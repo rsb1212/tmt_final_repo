@@ -1314,8 +1314,13 @@ export default function RepositoryPage() {
     return filterNodes(currentSpace.categories || []);
   }, [currentSpace, activeTab, starredSet, searchQuery]);
 
-  // Permissions
-  const canEdit = ['TESTER', 'MANAGER', 'ADMIN', 'SME'].includes(user?.role);
+  // Permissions (aligned with backend RBAC — see chenges.md Section 7)
+  // View: all roles. Upload documents: ADMIN, MANAGER, SME, TESTER.
+  // Edit page content: ADMIN, MANAGER, SME. Create/manage folders: ADMIN, MANAGER.
+  // Create/delete repository space: ADMIN.
+  const canEdit = ['MANAGER', 'ADMIN', 'SME'].includes(user?.role);
+  const canUpload = ['MANAGER', 'ADMIN', 'SME', 'TESTER'].includes(user?.role);
+  const canManageFolders = ['MANAGER', 'ADMIN'].includes(user?.role);
   const isAdmin = user?.role === 'ADMIN';
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1379,7 +1384,7 @@ export default function RepositoryPage() {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {isStarred && <Star size={11} fill="#f59e0b" color="#f59e0b" />}
-            {canEdit && (
+            {canManageFolders && (
               <button
                 title="Add Sub-Page"
                 onClick={e => {
@@ -1512,6 +1517,7 @@ export default function RepositoryPage() {
           </select>
 
           {/* Primary "+ Create Page" Action */}
+          {canManageFolders && (
           <button
             onClick={() => {
               setCreateParentId(null);
@@ -1533,6 +1539,7 @@ export default function RepositoryPage() {
             <Plus size={15} />
             Create Page
           </button>
+          )}
         </div>
 
         {/* Navigation Tabs (Pages / Starred / Templates) */}

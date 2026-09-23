@@ -1,614 +1,157 @@
-# Keycloak (IDEM) Authentication Implementation Guide
-## React + Spring Boot + RHSSO/Keycloak
-
----
-
-# Architecture Overview
-
-```text
-+-------------+
-| React UI    |
-+-------------+
-       |
-       | Login
-       v
-+-------------+
-| IDEM/RHSSO  |
-| Keycloak    |
-+-------------+
-       |
-       | JWT Token
-       v
-+------------------+
-| Spring Boot API  |
-+------------------+
-       |
-       | Authorization
-       v
-+------------------+
-| Protected APIs   |
-+------------------+
-```
-
----
-
-# IDEM Configuration
-
-Current IDEM Configuration:
-
-```json
-{
-  "realm": "internal",
-  "auth-server-url": "https://secure-sso-rhsso-np.apps.ocplife-np.bajajlife.com/auth/",
-  "ssl-required": "external",
-  "resource": "TMT",
-  "public-client": true,
-  "confidential-port": 0
-}
-```
-
-## Mapping
-
-| Field | Value |
-|---------|---------|
-| Realm | internal |
-| Client ID | TMT |
-| Auth Server | https://secure-sso-rhsso-np.apps.ocplife-np.bajajlife.com/auth |
-| Client Type | Public Client |
-
----
-
-# Step 1: Install Keycloak JS
-
-```bash
-npm install keycloak-js
-```
-
----
-
-# Step 2: Create keycloak.ts
-
-Create:
-
-```text
-src/lib/keycloak.ts
-```
-
-```typescript
-import Keycloak from 'keycloak-js';
-
-const keycloak = new Keycloak({
-    url: 'https://secure-sso-rhsso-np.apps.ocplife-np.bajajlife.com/auth',
-    realm: 'internal',
-    clientId: 'TMT'
-});
-
-export default keycloak;
-```
-
----
-
-# Step 3: Create Authentication Context
-
-Create:
-
-```text
-src/context/AuthContext.tsx
-```
-
-Use the AuthProvider code provided earlier.
-
-Responsibilities:
-
-- Initialize Keycloak
-- Check existing session
-- Login
-- Logout
-- Store user information
-- Handle authentication errors
-- Support role-based authorization
-
----
-
-# Step 4: Wrap Application
-
-Open:
-
-```text
-src/main.tsx
-```
-
-or
-
-```text
-src/index.tsx
-```
-
-Update:
-
-```tsx
-import { BrowserRouter } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
-
-root.render(
-    <BrowserRouter>
-        <AuthProvider>
-            <App />
-        </AuthProvider>
-    </BrowserRouter>
-);
-```
-
----
-
-# Step 5: Create Login Page
-
-```tsx
-import { useAuth } from '../context/AuthContext';
-
-export default function LoginPage() {
-    const { login } = useAuth();
-
-    return (
-        <button onClick={login}>
-            Login With IDEM
-        </button>
-    );
-}
-```
-
----
-
-# Step 6: Create Protected Route
-
-```tsx
-import { Navigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-
-export default function ProtectedRoute({
-    children,
-}: {
-    children: JSX.Element;
-}) {
-    const { isAuthenticated, isLoading } = useAuth();
-
-    if (isLoading) {
-        return <div>Loading...</div>;
-    }
-
-    if (!isAuthenticated) {
-        return <Navigate to="/login" />;
-    }
-
-    return children;
-}
-```
-
-Usage:
-
-```tsx
-<Route
-    path="/dashboard"
-    element={
-        <ProtectedRoute>
-            <Dashboard />
-        </ProtectedRoute>
-    }
-/>
-```
-
----
-
-# Step 7: Configure Axios
-
-Create:
-
-```text
-src/lib/apiClient.ts
-```
-
-```typescript
-import axios from "axios";
-import keycloak from "./keycloak";
-
-export const apiClient = axios.create({
-    baseURL: "/api"
-});
-
-apiClient.interceptors.request.use((config) => {
-
-    if (keycloak.token) {
-        config.headers.Authorization =
-            `Bearer ${keycloak.token}`;
-    }
-
-    return config;
-});
-```
-
-This automatically sends:
-
-```http
-Authorization: Bearer eyJhbGciOi...
-```
-
-for every API call.
-
----
-
-# Step 8: Add Spring Security Dependency
-
-pom.xml
-
-```xml
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>
-        spring-boot-starter-oauth2-resource-server
-    </artifactId>
-</dependency>
-```
-
----
-
-# Step 9: Configure Spring Boot
-
-application.properties
-
-```properties
-spring.security.oauth2.resourceserver.jwt.issuer-uri=https://secure-sso-rhsso-np.apps.ocplife-np.bajajlife.com/auth/realms/internal
-```
-
----
-
-# Step 10: Create SecurityConfig
-
-```java
-@Configuration
-@EnableWebSecurity
-public class SecurityConfig {
-
-    @Bean
-    SecurityFilterChain securityFilterChain(
-            HttpSecurity http)
-            throws Exception {
-
-        http
-            .csrf(csrf -> csrf.disable())
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers(
-                        "/api/public/**"
-                ).permitAll()
- **             .anyRequest()
-      **        .authenticated()
-        **  )
-            .oauth2ResourceSe**er(
-                oauth -> oaut**jwt()
-            );
-
-        ret**n http.build();
-    }
-}
-```
-
----
-** Step 11: Create User Profile API**```java
-@RestController
-@RequestM**ping("/api")
-public class UserCon**oller {
-
-    @GetMapping("/profil**)
-    public Map<String, Object> **ofile(
-            Jwt jwt) {
-
-  **    return Map.of(
-              **"username",
-                jwt.g**Claim("preferred_username"),
-    **          "email",
-              **jwt.getClaim("email"),
-          **    "name",
-                jwt.g**Claim("name")
-        );
-    }
-}
-**`
-
----
-
-# Step 12: Fetch User Aft** Login
-
-Create endpoint:
-
-```java**PostMapping("/auth/keycloak-login**
-public ResponseEntity<?> login(
-**      Jwt jwt) {
-
-    Map<String,**bject> response =
-            Map**f(
-                    "data",
-  **                Map.of(
-         **                 "user",
-        **                  Map.of(
-       **                           "id",
-**                                 **wt.getSubject(),
-
-               **                   "email",
-     **                             jwt.**tClaim("email"),
-
-               **                   "fullName",
-  **                                j**.getClaim("name"),
-
-             **                     "role",
-    **                              "US**"
-                            )
- **                 )
-            );**    return ResponseEntity.ok(resp**se);
-}
-```
-
-This endpoint is call** from:
-
-```typescript
-POST /auth/**ycloak-login
-```
-
-inside AuthProv**er.
-
----
-
-# Step 13: Extract Role**From Keycloak
-
-Keycloak token exa**le:
-
-```json
-{
-    "realm_access"**{
-        "roles": [
-            "ADMIN",
-            "USER"
-        ]
-    }
-}
-```
-
-Create converter:
-
-**`java
-@Bean
-JwtAuthenticationConv**ter jwtAuthenticationConverter() **
-    JwtAuthenticationConverter c**verter =
-            new JwtAuthe**icationConverter();
-
-    converte**setJwtGrantedAuthoritiesConverter**wt -> {
-
-        Map<String, Obje**> realmAccess =
-                j**.getClaim("realm_access");
-
-     ** if (realmAccess == null) {
-     **     return List.of();
-        }
-**       List<String> roles =
-     **         (List<String>)
-         **             realmAccess.get("rol**");
-
-        return roles.stream(**                .map(role ->
-    **                  new SimpleGrant**Authority(
-                      **        "ROLE_" + role))
-        **      .toList();
-    });
-
-    ret**n converter;
-}
-```
-
----
-
-# Step 1** Protect APIs By Role
-
-```java
-@P**Authorize("hasRole('ADMIN')")
-@Ge**apping("/admin")
-public String ad**n() {
-    return "Admin Access";
-**```
-
-```java
-@PreAuthorize("hasAn**ole('ADMIN','MANAGER')")
-@GetMapp**g("/reports")
-public String repor**() {
-    return "Reports";
-}
-```
-**--
-
-# Step 15: Logout
-
-Frontend:
-**``tsx
-await keycloak.logout({
-   **edirectUri:
-        window.locati**.origin + "/login"
-});
-```
-
-Backe**:
-
-```java
-@PostMapping("/auth/lo**ut")
-public ResponseEntity<?> log**t() {
-
-    SecurityContextHolder.**earContext();
-
-    return Respons**ntity.ok().build();
-}
-```
-
----
-
-#**tep 16: Verify Login
-
-Open:
-
-```t**t
-http://localhost:3000
-```
-
-Clic**
-
-```text
-Login With IDEM
-```
-
-Ex**cted:
-
-```text
-React
-   ↓
-IDEM Lo**n Page
-   ↓
-Successful Login
-   ↓**ashboard
-```
-
----
-
-# Step 17: Ver**y JWT Token
-
-Browser Console:
-
-``**avascript
-console.log(keycloak.to**n);
-```
-
-Expected:
-
-```text
-eyJhb**iOiJSUzI1Ni...
-```
-
----
-
-# Step 1** Verify API Access
-
-Request:
-
-```**tp
-GET /api/profile
-Authorization**Bearer eyJhbGciOi...
-```
-
-Expecte**
-
-```json
-{
-  "username":"rahul.b**gat",
-  "email":"rahul.bhagat@tes**enii.com",
-  "name":"Rahul Bhagat**}
-```
-
----
-
-# Keycloak Client Con**guration Required
-
-Ask the IDM Te** to configure the TMT client.
-
-##**alid Redirect URIs
-
-Development
-
-**`text
-http://localhost:3000/*
-```**UAT
-
-```text
-http://10.3.41.102/***``
-
-Production
-
-```text
-https://t**tgenii.com/*
-```
-
----
-
-## Web Ori**ns
-
-Development
-
-```text
-http://l**alhost:3000
-```
-
-UAT
-
-```text
-htt**//10.3.41.102
-```
-
-Production
-
-``**ext
-https://testgenii.com
-```
-
---**
-# Testing Checklist
-
-## Login
-
--** ] IDEM Login Page Opens
-- [ ] Lo**n Success
-- [ ] Redirect To Dashb**rd
-
-## Token
-
-- [ ] JWT Generated** [ ] Token Sent In Header
-
-## Bac**nd
-
-- [ ] Spring Boot Validates J**
-- [ ] User Profile API Works
-- [ ] Unauthorized Requests Return 401**## Authorization
-
-- [ ] ADMIN Rol**Works
-- [ ] USER Restrictions Work
-- [ ] Role-Based APIs Protected
-
----
-
-# Final Flow
-
-```text
-User
-  |
-  v
-React Login Page
-  |
-  v
-keycloak.login()
-  |
-  v
-IDEM / RHSSO
-  |
-  v
-Access Token
-  |
-  v
-React Stores Token
-  |
-  v
-API Calls
-Authorization: Bearer <token>
-  |
-  v
-Spring Security
-  |
-  v
-JWT Validation
-  |
-  v
-Protected APIs
-  |
-  v
-Dashboard
-```
+[Rahul.Bhagat@L5SRL2TMS01 backend]$ cat /var/www/html/TestManagementSystem/backend/application.properties
+spring.application.name=test-management-tool
+spring.profiles.active=${SPRING_PROFILES_ACTIVE:prod}
+# ── Server ───────────────────────────────────────────────────────────────────
+server.port=${SERVER_PORT:8080}
+server.address=${SERVER_ADDRESS:0.0.0.0}
+server.servlet.context-path=${SERVER_CONTEXT_PATH:/}
+server.shutdown=graceful
+spring.lifecycle.timeout-per-shutdown-phase=30s
+
+
+app.keycloak.issuer-uri=https://secure-sso-rhsso-np.apps.ocplife-np.bajajlife.com/auth/realms/internal
+
+app.keycloak.jwk-set-uri=https://secure-sso-rhsso-np.apps.ocplife-np.bajajlife.com/auth/realms/internal/protocol/openid-connect/certs
+
+logging.level.org.hibernate.SQL=DEBUG
+logging.level.org.hibernate.orm.jdbc.bind=TRACE
+
+# Behind a reverse proxy (nginx / ELB) — honor X-Forwarded-* headers
+server.forward-headers-strategy=framework
+server.tomcat.remoteip.remote-ip-header=X-Forwarded-For
+server.tomcat.remoteip.protocol-header=X-Forwarded-Proto
+server.tomcat.accesslog.enabled=${ACCESS_LOG_ENABLED:false}
+server.tomcat.accesslog.directory=${ACCESS_LOG_DIR:logs}
+server.tomcat.max-threads=${TOMCAT_MAX_THREADS:200}
+server.tomcat.accept-count=${TOMCAT_ACCEPT_COUNT:100}
+server.tomcat.connection-timeout=${TOMCAT_CONN_TIMEOUT:20000}
+
+# Response compression
+server.compression.enabled=true
+server.compression.mime-types=application/json,application/xml,text/html,text/plain,text/css,application/javascript
+server.compression.min-response-size=1024
+
+# Hide error details from clients
+server.error.include-message=never
+server.error.include-stacktrace=never
+server.error.include-binding-errors=never
+
+# ── Database ─────────────────────────────────────────────────────────────────
+spring.datasource.url=${DATASOURCE_URL:jdbc:postgresql://10.3.41.102:5566/tmt_uat}
+spring.datasource.username=testapp
+spring.datasource.password=te!st@qpsl$209!
+spring.datasource.driver-class-name=org.postgresql.Driver
+
+# HikariCP connection pool
+spring.datasource.hikari.pool-name=TmtHikariPool
+spring.datasource.hikari.maximum-pool-size=${DB_POOL_MAX:20}
+spring.datasource.hikari.minimum-idle=${DB_POOL_MIN_IDLE:5}
+spring.datasource.hikari.connection-timeout=${DB_POOL_CONN_TIMEOUT:30000}
+spring.datasource.hikari.idle-timeout=${DB_POOL_IDLE_TIMEOUT:600000}
+spring.datasource.hikari.max-lifetime=${DB_POOL_MAX_LIFETIME:1800000}
+spring.datasource.hikari.leak-detection-threshold=${DB_POOL_LEAK_THRESHOLD:0}
+
+frontend.url=${FRONTEND_URL:http://10.3.41.102}
+
+# ── JPA / Hibernate ──────────────────────────────────────────────────────────
+# Use 'validate' in production; override with JPA_DDL_AUTO=update for first-run migrations
+spring.jpa.hibernate.ddl-auto=${JPA_DDL_AUTO:validate}
+# NOTE: Kept enabled because several list services (ProjectService.findAll,
+# findAllFlat, etc.) map entities to DTOs OUTSIDE a @Transactional boundary
+# and rely on lazy loading during JSON serialization. Turning this off caused
+# LazyInitializationException and empty responses in the UI. Do not disable
+# without first annotating every read-path service method @Transactional.
+spring.jpa.open-in-view=true
+spring.jpa.show-sql=${JPA_SHOW_SQL:false}
+spring.jpa.properties.hibernate.format_sql=false
+spring.jpa.properties.hibernate.jdbc.batch_size=25
+spring.jpa.properties.hibernate.order_inserts=true
+spring.jpa.properties.hibernate.order_updates=true
+
+# ── JWT (session token issued after IDEM SSO login) ──────────────────────────
+# Generate: openssl rand -base64 64 — must be set in environment.
+# NOTE: Local username/password JWT login is DISABLED (see AuthController).
+# The JWT here is only used as the short-lived app SESSION token minted after a
+# successful IDEM / RH-SSO (Keycloak) OIDC login.
+app.jwt.secret=xsq9YBDCo1SUh9t9yDzqmxyUXmrTOEdE2Gh39EQV/zDJEyy9x2/DTmV6sguXVOlOO4nwWeGSj2gr70iFPnQpYg==
+app.jwt.expiration=${JWT_EXPIRATION:7200000}
+
+# ── IDEM / RH-SSO (Keycloak) OIDC — public client, Authorization Code + PKCE ──
+# When users click "Sign in with IDEM" the backend redirects the browser to the
+# RH-SSO authorize endpoint, then exchanges the returned code (no client secret,
+# public client) for tokens, provisions/loads a local user and mints an app JWT.
+app.idem.enabled=${IDEM_ENABLED:true}
+# Realm base URL. For legacy Keycloak the path includes /auth.
+app.idem.issuer-uri=${IDEM_ISSUER_URI:https://bajaj-keycloak-rhbk-np.apps.ocplife-np.bajajlife.com/auth/realms/internal}
+app.idem.client-id=${IDEM_CLIENT_ID:TMT}
+# Backend callback that RH-SSO redirects back to (must be registered as a valid
+# redirect URI on the TMT client in Keycloak).
+app.idem.redirect-uri=${IDEM_REDIRECT_URI:http://10.3.41.102/api/v1/auth/idem/callback}
+# Where the backend sends the browser after a successful login (frontend origin).
+app.idem.post-login-redirect=${IDEM_POST_LOGIN_REDIRECT:http://10.3.41.102/login}
+app.idem.scope=${IDEM_SCOPE:openid profile email}
+# Default application role assigned to a first-time SSO user when no matching
+# realm role is present on the token.
+app.idem.default-role=${IDEM_DEFAULT_ROLE:TESTER}
+# Default tenant assigned to newly provisioned SSO users.
+app.idem.default-tenant-id=${IDEM_DEFAULT_TENANT_ID:00000000-0000-0000-0000-000000000001}
+
+# ── SpringDoc / Swagger (disable in production by default) ───────────────────
+springdoc.api-docs.enabled=${SWAGGER_ENABLED:false}
+springdoc.swagger-ui.enabled=${SWAGGER_ENABLED:false}
+springdoc.api-docs.path=/api-docs
+springdoc.swagger-ui.path=/swagger-ui.html
+springdoc.swagger-ui.operationsSorter=method
+
+# ── Actuator (locked down) ───────────────────────────────────────────────────
+management.endpoints.web.exposure.include=${ACTUATOR_ENDPOINTS:health,info}
+management.endpoint.health.show-details=when_authorized
+management.endpoint.health.probes.enabled=true
+management.info.env.enabled=false
+management.info.java.enabled=true
+management.info.os.enabled=false
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+logging.level.root=${ROOT_LOG_LEVEL:INFO}
+logging.level.com.testmgmt=${APP_LOG_LEVEL:INFO}
+logging.level.org.springframework.security=${SECURITY_LOG_LEVEL:WARN}
+logging.level.org.hibernate.SQL=${SQL_LOG_LEVEL:WARN}
+logging.pattern.console=%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n
+logging.file.name=${LOG_FILE:logs/tmt-backend.log}
+logging.logback.rollingpolicy.max-file-size=${LOG_MAX_SIZE:50MB}
+logging.logback.rollingpolicy.max-history=${LOG_MAX_HISTORY:30}
+logging.logback.rollingpolicy.total-size-cap=${LOG_TOTAL_SIZE_CAP:2GB}
+
+# ── Cache ────────────────────────────────────────────────────────────────────
+spring.cache.type=simple
+
+# ── Multipart (file uploads) ─────────────────────────────────────────────────
+spring.servlet.multipart.enabled=true
+spring.servlet.multipart.max-file-size=${MAX_FILE_SIZE:100MB}
+spring.servlet.multipart.max-request-size=${MAX_REQUEST_SIZE:500MB}
+spring.servlet.multipart.file-size-threshold=2MB
+
+# ── JIRA Integration (Optional) ──────────────────────────────────────────────
+# Set JIRA_ENABLED=true in environment to activate JIRA sync
+jira.enabled=${JIRA_ENABLED:false}
+jira.base-url=${JIRA_BASE_URL:}
+jira.email=${JIRA_EMAIL:}
+jira.api-token=${JIRA_API_TOKEN:}
+jira.project-key=${JIRA_PROJECT_KEY:}
+jira.issue-type=${JIRA_ISSUE_TYPE:Bug}
+
+# File Upload Directory
+app.upload.dir=${UPLOAD_DIR:./uploads}
+
+# CORS Configuration
+app.cors.allowed-origins=${CORS_ALLOWED_ORIGINS:http://10.3.41.102}
+
+# ── Default Admin Configuration (Optional) ───────────────────────────────────
+# Set DEFAULT_ADMIN_ENABLED=true in environment to auto-create admin on startup
+app.default-admin.enabled=${DEFAULT_ADMIN_ENABLED:false}
+app.default-admin.email=${DEFAULT_ADMIN_EMAIL:}
+app.default-admin.username=${DEFAULT_ADMIN_USERNAME:admin}
+app.default-admin.password=${DEFAULT_ADMIN_PASSWORD:}
+app.default-admin.fullname=${DEFAULT_ADMIN_FULLNAME:Platform Admin}
+app.default-admin.team=${DEFAULT_ADMIN_TEAM:Platform}
+[Rahul.Bhagat@L5SRL2TMS01 backend]$

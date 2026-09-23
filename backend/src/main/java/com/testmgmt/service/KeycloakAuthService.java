@@ -1,13 +1,10 @@
 package com.testmgmt.service;
 
-import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -23,6 +20,7 @@ import com.testmgmt.entity.Tenant;
 import com.testmgmt.entity.User;
 import com.testmgmt.enums.UserRole;
 import com.testmgmt.exception.BadRequestException;
+import com.testmgmt.exception.UnauthorizedException;
 import com.testmgmt.repository.TenantRepository;
 import com.testmgmt.repository.UserRepository;
 import com.testmgmt.security.JwtUtil;
@@ -30,6 +28,15 @@ import com.testmgmt.security.JwtUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+/**
+ * Token-based IDEM / Keycloak login.
+ *
+ * <p>Authorization is controlled entirely by the application database. After the
+ * IDEM/Keycloak token is validated, the user is looked up by email. If the user
+ * does not exist in the Users table, access is denied. Users are NEVER
+ * auto-provisioned and NEVER receive a default TESTER role. The role that ends
+ * up in the app session JWT always comes from the database.
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -37,7 +44,6 @@ public class KeycloakAuthService {
 
     private final UserRepository userRepository;
     private final TenantRepository tenantRepository;
-    private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final UserDetailsService userDetailsService;
 
@@ -81,11 +87,29 @@ public class KeycloakAuthService {
                 jwt.getClaimAsString("name"),
                 email);
 
-        UserRole role = extractRole(jwt);
+        log.info("User authenticated from IDEM: email={}", email);
 
+        // Authorization is controlled by the application database. The user must
+        // already exist in the Users table. We DO NOT auto-provision users and
+        // DO NOT assign a default TESTER role.
         User user = userRepository.findByEmail(email)
-                .map(existing -> syncUser(existing, fullName, role))
-                .orElseGet(() -> provisionUser(email, fullName, role));
+                .orElseThrow(() -> {
+                    log.warn("IDEM user not found in database - denying access: email={}", email);
+                    return new UnauthorizedException(
+                            "User is not registered in the application. Please contact your administrator.");
+                });
+
+        if (Boolean.FALSE.equals(user.getActive())) {
+            log.warn("IDEM user is disabled - denying access: email={}", email);
+            throw new UnauthorizedException(
+                    "Your account is disabled. Please contact your administrator.");
+        }
+
+        log.info("User found in database: email={}, role assigned from database={}",
+                email, user.getRole());
+
+        // Keep the display name fresh, but the role ALWAYS comes from the DB.
+        user = syncUser(user, fullName);
 
         UserDetails userDetails =
                 userDetailsService.loadUserByUsername(user.getEmail());
@@ -98,7 +122,8 @@ public class KeycloakAuthService {
         String appToken =
                 jwtUtil.generateToken(userDetails, tenantId);
 
-        log.info("========== IDEM LOGIN SUCCESS ==========");
+        log.info("========== IDEM LOGIN SUCCESS ========== email={} role={} redirect={}",
+                email, user.getRole(), dashboardFor(user.getRole()));
 
         return AuthResponse.builder()
                 .token(appToken)
@@ -158,122 +183,32 @@ public class KeycloakAuthService {
         return local;
     }
 
-    @SuppressWarnings("unchecked")
-    private UserRole extractRole(Jwt jwt) {
-
-        Object realmAccess = jwt.getClaim("realm_access");
-
-        if (realmAccess instanceof Map<?, ?> map) {
-
-            Object rolesObj = map.get("roles");
-
-            if (rolesObj instanceof List<?> roles) {
-
-                for (Object role : (List<Object>) roles) {
-
-                    UserRole mapped =
-                            mapRole(String.valueOf(role));
-
-                    if (mapped != null) {
-                        return mapped;
-                    }
-                }
-            }
-        }
-
-        return UserRole.TESTER;
-    }
-
-    private UserRole mapRole(String role) {
-
-        if (role == null) {
-            return null;
-        }
-
-        String normalized =
-                role.trim()
-                        .toUpperCase()
-                        .replace("ROLE_", "");
-
-        return switch (normalized) {
-            case "ADMIN" -> UserRole.ADMIN;
-            case "MANAGER", "LEAD" -> UserRole.MANAGER;
-            case "SME" -> UserRole.SME;
-            case "TESTER", "USER" -> UserRole.TESTER;
-            case "VIEWER" -> UserRole.VIEWER;
-            default -> null;
-        };
-    }
-
-    private User provisionUser(
-            String email,
-            String fullName,
-            UserRole role) {
-
-        User user = User.builder()
-                .username(uniqueUsername(email))
-                .email(email)
-                .passwordHash(
-                        passwordEncoder.encode(
-                                UUID.randomUUID().toString()))
-                .fullName(fullName)
-                .role(role)
-                .active(true)
-                .build();
-
-        return userRepository.save(user);
-    }
-
-    private User syncUser(
-            User existing,
-            String fullName,
-            UserRole role) {
+    /**
+     * Keep profile details (name) fresh on each login WITHOUT ever changing the
+     * role. The role is always taken from the database.
+     */
+    private User syncUser(User existing, String fullName) {
 
         boolean dirty = false;
 
-        if (Boolean.FALSE.equals(existing.getActive())) {
-            existing.setActive(true);
-            dirty = true;
-        }
-
-        if (fullName != null &&
-                !fullName.equals(existing.getFullName())) {
-
+        if (fullName != null && !fullName.equals(existing.getFullName())) {
             existing.setFullName(fullName);
             dirty = true;
         }
 
-        if (role != null &&
-                role != existing.getRole()) {
-
-            existing.setRole(role);
-            dirty = true;
-        }
-
-        return dirty
-                ? userRepository.save(existing)
-                : existing;
+        return dirty ? userRepository.save(existing) : existing;
     }
 
-    private String uniqueUsername(String email) {
-
-        String base =
-                email.contains("@")
-                        ? email.substring(0, email.indexOf("@"))
-                        : email;
-
-        if (base.length() > 45) {
-            base = base.substring(0, 45);
+    /** Human-friendly dashboard destination used only for logging. */
+    private String dashboardFor(UserRole role) {
+        if (role == null) {
+            return "/login";
         }
-
-        String candidate = base;
-        int suffix = 1;
-
-        while (userRepository.existsByUsername(candidate)) {
-            candidate = base + suffix++;
-        }
-
-        return candidate;
+        return switch (role) {
+            case ADMIN -> "/admin-dashboard";
+            case MANAGER -> "/manager-dashboard";
+            default -> "/dashboard";
+        };
     }
 
     private TenantResponse loadTenant(UUID tenantId) {

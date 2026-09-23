@@ -147,6 +147,7 @@ com\testmgmt\dto\response\ResponseDTOs$ImportResultResponse$ImportResultResponse
 com\testmgmt\entity\StepExecution.class
 com\testmgmt\dto\response\ResponseDTOs$ModuleStatusSummary.class
 com\testmgmt\dto\request\WorkflowDTOs$AssignCasesRequest.class
+com\testmgmt\security\IdemSsoService$IdemLoginException.class
 com\testmgmt\entity\Notification$NotificationBuilder.class
 com\testmgmt\service\TeamService$TeamRequest.class
 com\testmgmt\repository\TestExecutionRepository.class
@@ -192,6 +193,7 @@ com\testmgmt\entity\User.class
 com\testmgmt\entity\StepExecution$StepExecutionBuilder.class
 com\testmgmt\dto\response\ResponseDTOs$TenantResponse.class
 com\testmgmt\controller\NotificationController$BroadcastRequest.class
+com\testmgmt\service\KeycloakAuthService.class
 com\testmgmt\service\CallNumberService.class
 com\testmgmt\service\UserManagementService.class
 com\testmgmt\dto\request\WorkflowDTOs$RequestChangesRequest.class
@@ -266,6 +268,7 @@ com\testmgmt\dto\response\ResponseDTOs$SmeModuleStats.class
 com\testmgmt\entity\SignOff$SignOffBuilder.class
 com\testmgmt\dto\response\ResponseDTOs$UserResponse.class
 com\testmgmt\dto\request\WorkflowDTOs$AssignByModuleRequest.class
+com\testmgmt\service\IdemAuthService.class
 com\testmgmt\repository\AttachmentRepository.class
 com\testmgmt\dto\PdCrCallDTOs$AgeingRow.class
 com\testmgmt\dto\response\ResponseDTOs$AttachmentResponse$AttachmentResponseBuilder.class
@@ -312,6 +315,7 @@ com\testmgmt\dto\request\RepositoryDTOs$UpdateCategoryRequest.class
 com\testmgmt\dto\request\WorkflowDTOs$StepRequest.class
 com\testmgmt\dto\request\RepositoryDTOs$UpdateCategoryRequest$UpdateCategoryRequestBuilder.class
 com\testmgmt\enums\CallStatus.class
+com\testmgmt\exception\UnauthorizedException.class
 com\testmgmt\controller\WorkflowController.class
 com\testmgmt\security\RateLimitFilter$RateEntry.class
 com\testmgmt\repository\RequirementRepository.class
@@ -345,6 +349,7 @@ com\testmgmt\entity\Requirement.class
 com\testmgmt\dto\request\WorkflowDTOs$CreateProjectRequest.class
 com\testmgmt\enums\ReleaseReason.class
 com\testmgmt\repository\RepositoryDocumentRepository.class
+com\testmgmt\service\KeycloakAuthService$1.class
 com\testmgmt\dto\response\ExecutionResponseDTOs$ExecutionHistoryResponse.class
 com\testmgmt\entity\RepositoryNodeDocument.class
 com\testmgmt\entity\AuditLog.class

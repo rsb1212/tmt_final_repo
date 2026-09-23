@@ -48,7 +48,15 @@ export default function LoginPage() {
       }
     } else if (sso === 'error') {
       const reason = params.get('reason') || 'unknown';
-      setError(`Single sign-on failed (${reason}). Please try again.`);
+      const friendly = {
+        user_not_registered:
+          'You are not registered in the application. Please contact your administrator.',
+        user_disabled:
+          'Your account is disabled. Please contact your administrator.',
+        no_email_claim:
+          'Your IDEM profile did not provide an email address. Please contact your administrator.',
+      }[reason] || `Single sign-on failed (${reason}). Please try again.`;
+      setError(friendly);
       window.history.replaceState({}, document.title, '/login');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

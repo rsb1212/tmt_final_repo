@@ -10,21 +10,18 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Base64;
-import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.testmgmt.entity.User;
-import com.testmgmt.enums.UserRole;
 import com.testmgmt.repository.UserRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -55,7 +52,6 @@ public class IdemSsoService {
 
     private final UserRepository       userRepository;
     private final UserDetailsService   userDetailsService;
-    private final PasswordEncoder      passwordEncoder;
     private final JwtUtil              jwtUtil;
     private final ObjectMapper         objectMapper = new ObjectMapper();
 
@@ -74,12 +70,6 @@ public class IdemSsoService {
 
     @Value("${app.idem.scope:openid profile email}")
     private String scope;
-
-    @Value("${app.idem.default-role:TESTER}")
-    private String defaultRole;
-
-    @Value("${app.idem.default-tenant-id:00000000-0000-0000-0000-000000000001}")
-    private String defaultTenantId;
 
     private final SecureRandom secureRandom = new SecureRandom();
 
@@ -193,7 +183,13 @@ public class IdemSsoService {
         return new LoginResult(appToken, user);
     }
 
-    /** Find-or-create a local user from the RH-SSO token claims. */
+    /**
+     * Resolve the local user from the RH-SSO token claims.
+     *
+     * <p>Authorization is controlled by the application database. The user MUST
+     * already exist in the Users table — we DO NOT auto-provision users and DO
+     * NOT assign a default TESTER role. The role always comes from the database.
+     */
     private User provisionUser(JsonNode claims) {
         String email = firstNonBlank(
                 claims.path("email").asText(null),
@@ -214,61 +210,38 @@ public class IdemSsoService {
                 (claims.path("given_name").asText("") + " " + claims.path("family_name").asText("")).trim(),
                 email);
 
-        UserRole role = resolveRole(claims);
+        log.info("User authenticated from IDEM: email='{}'", email);
 
         User user = userRepository.findByEmail(email).orElse(null);
         if (user == null) {
-            user = User.builder()
-                    // User ID (username) is always the corporate domain email.
-                    .username(email)
-                    .email(email)
-                    .fullName(fullName)
-                    // SSO users have no local password — store an unusable random hash.
-                    .passwordHash(passwordEncoder.encode("SSO-" + UUID.randomUUID()))
-                    .role(role)
-                    .tenantId(UUID.fromString(defaultTenantId))
-                    .active(true)
-                    .build();
-            user = userRepository.save(user);
-            log.info("Provisioned new IDEM SSO user '{}' with role {}", email, role);
-        } else {
-            // Keep profile fresh on each login; do NOT downgrade an existing role.
-            // Ensure the User ID stays equal to the domain email.
-            if (!email.equals(user.getUsername())) {
-                user.setUsername(email);
-            }
-            if (fullName != null && !fullName.isBlank()) {
-                user.setFullName(fullName);
-            }
-            if (Boolean.FALSE.equals(user.getActive())) {
-                user.setActive(true);
-            }
-            if (user.getTenantId() == null) {
-                user.setTenantId(UUID.fromString(defaultTenantId));
-            }
+            log.warn("IDEM user not found in database — denying access: email='{}'", email);
+            throw new IdemLoginException("user_not_registered",
+                    "User is not registered in the application. Please contact your administrator.");
+        }
+
+        if (Boolean.FALSE.equals(user.getActive())) {
+            log.warn("IDEM user is disabled — denying access: email='{}'", email);
+            throw new IdemLoginException("user_disabled",
+                    "Your account is disabled. Please contact your administrator.");
+        }
+
+        log.info("User found in database: email='{}', role assigned from database='{}'",
+                email, user.getRole());
+
+        // Keep the profile fresh on each login; the role ALWAYS comes from the DB.
+        boolean dirty = false;
+        if (!email.equals(user.getUsername())) {
+            user.setUsername(email);
+            dirty = true;
+        }
+        if (fullName != null && !fullName.isBlank() && !fullName.equals(user.getFullName())) {
+            user.setFullName(fullName);
+            dirty = true;
+        }
+        if (dirty) {
             user = userRepository.save(user);
         }
         return user;
-    }
-
-    /** Map a Keycloak realm role to a local {@link UserRole}, else use the default. */
-    private UserRole resolveRole(JsonNode claims) {
-        JsonNode realmRoles = claims.path("realm_access").path("roles");
-        if (realmRoles.isArray()) {
-            for (JsonNode r : realmRoles) {
-                String candidate = r.asText("").trim().toUpperCase();
-                for (UserRole role : UserRole.values()) {
-                    if (role.name().equals(candidate)) {
-                        return role;
-                    }
-                }
-            }
-        }
-        try {
-            return UserRole.valueOf(defaultRole.trim().toUpperCase());
-        } catch (Exception e) {
-            return UserRole.TESTER;
-        }
     }
 
     // ── PKCE / JWT helpers ────────────────────────────────────────────────────
