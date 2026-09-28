@@ -1,0 +1,198 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main, master, develop]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master, develop]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Deploy to server after build'
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  # GHCR requires a lowercase namespace
+  IMAGE_NAMESPACE: ghcr.io/rahul-bhagat_balict
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  backend:
+    name: Backend · build & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Fail on unresolved merge conflict markers
+        working-directory: .
+        run: |
+          if git grep -nE '^(<<<<<<<|>>>>>>>) ' -- backend/src frontend/src backend/pom.xml frontend/package.json; then
+            echo "::error::Unresolved merge conflict markers found"; exit 1
+          fi
+
+      - name: Build & run tests (H2, profile=test)
+        run: mvn -B -ntp verify
+
+      - name: Publish test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: backend/target/surefire-reports/
+          if-no-files-found: ignore
+
+      - name: Upload JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: backend/target/test-management-tool-*.jar
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend · build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Build (production)
+        run: npm run build -- --mode production
+
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────
+  docker:
+    name: Docker · build & push images
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAMESPACE }}/tmt-${{ matrix.service }}
+          tags: |
+            type=sha,prefix=,format=long
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build${{ github.event_name != 'pull_request' && ' & push' || '' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          build-args: |
+            VITE_KEYCLOAK_URL=${{ vars.VITE_KEYCLOAK_URL || 'https://secure-sso-rhsso-np.apps.ocplife-np.bajajlife.com/auth' }}
+            VITE_KEYCLOAK_REALM=${{ vars.VITE_KEYCLOAK_REALM || 'internal' }}
+            VITE_KEYCLOAK_CLIENT_ID=${{ vars.VITE_KEYCLOAK_CLIENT_ID || 'TMT' }}
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Runs on tag push (v*) or manual dispatch with deploy=true.
+  # Requires repo secrets: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_PATH,
+  #                        POSTGRES_PASSWORD, JWT_SECRET
+  # and a GitHub Environment named "production" (add required reviewers there).
+  deploy:
+    name: Deploy · production
+    needs: docker
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.deploy)
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy compose file to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: docker-compose.yml
+          target: ${{ secrets.DEPLOY_PATH }}
+
+      - name: Pull images & restart stack
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN,POSTGRES_PASSWORD,JWT_SECRET
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            export IMAGE_TAG POSTGRES_PASSWORD JWT_SECRET
+            docker compose pull backend frontend
+            docker compose up -d --no-build --remove-orphans
+            # Smoke test — fail the deploy if the backend never becomes healthy
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8080/api/v1/health >/dev/null; then
+                echo "Backend healthy"; docker image prune -f; exit 0
+              fi
+              sleep 5
+            done
+            echo "Backend did not become healthy"; docker compose logs --tail=200 backend; exit 1

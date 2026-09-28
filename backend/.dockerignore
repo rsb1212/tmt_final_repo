@@ -1,0 +1,15 @@
+target/
+logs/
+uploads/
+*.log
+*.gz
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+*.iml
+*.xlsx
+*.md
+[Service].txt
+scripts/

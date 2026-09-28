@@ -1,0 +1,9 @@
+node_modules/
+dist/
+stats.html
+*.log
+.env
+.env.local
+.env.*.local
+.idea/
+.vscode/

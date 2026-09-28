@@ -1,0 +1,33 @@
+[Rahul.Bhagat@L5SRL2TMS01 TestManagementSystem]$ cat testmgmt.service
+[Unit]
+Description=Test Management System Backend Service
+After=syslog.target network.target postgresql.service
+
+[Service]
+User=root
+WorkingDirectory=/var/www/html/TestManagementSystem/backend
+ExecStart=/usr/bin/java -jar test-management-tool-1.0.0.jar
+SuccessExitStatus=143
+Restart=always
+RestartSec=10
+
+# Production Configuration Environment Variables
+# Please update database URL, username, and password to match your Linux server setup.
+Environment=SPRING_DATASOURCE_URL=jdbc:postgresql://10.3.41.102:5566/tmt_uat
+Environment=SPRING_DATASOURCE_USERNAME=testapp
+Environment=SPRING_DATASOURCE_PASSWORD=te!st@qpsl$209!
+Environment=APP_JWT_SECRET=404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+Environment=APP_JWT_EXPIRATION=86400000
+
+# Optional Integration Variables
+# Environment=JIRA_BASE_URL=https://your-domain.atlassian.net
+# Environment=JIRA_API_TOKEN=your-jira-token
+
+# Standard output and error logging
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=testmgmt-backend
+
+[Install]
+WantedBy=multi-user.target
+[Rahul.Bhagat@L5SRL2TMS01 TestManagementSystem]$
