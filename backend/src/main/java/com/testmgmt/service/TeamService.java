@@ -209,6 +209,52 @@ public class TeamService {
         return userRepository.countByTeamIdAndActiveTrue(teamId);
     }
 
+    // ── Team Member Management ────────────────────────────────────────────────
+
+    /** List all active members of a team */
+    @Transactional(readOnly = true)
+    public List<com.testmgmt.dto.response.ResponseDTOs.UserResponse> getTeamMembers(UUID teamId) {
+        teamRepository.findById(teamId)
+                .orElseThrow(() -> new ResourceNotFoundException("Team", teamId));
+        return userRepository.findByTeamIdAndActiveTrue(teamId)
+                .stream()
+                .map(AuthService::toUserResponse)
+                .collect(Collectors.toList());
+    }
+
+    /** Add one or more users to a team (sets user.teamId). Returns updated members. */
+    @Transactional
+    public List<com.testmgmt.dto.response.ResponseDTOs.UserResponse> addTeamMembers(UUID teamId, List<UUID> userIds) {
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> new ResourceNotFoundException("Team", teamId));
+        if (userIds == null || userIds.isEmpty()) {
+            return getTeamMembers(teamId);
+        }
+        for (UUID uid : userIds) {
+            com.testmgmt.entity.User user = userRepository.findById(uid)
+                    .orElseThrow(() -> new ResourceNotFoundException("User", uid));
+            user.setTeamId(team.getId());
+            if (team.getCode() != null) user.setTeam(team.getCode());
+            userRepository.save(user);
+        }
+        log.info("Added {} member(s) to team {}", userIds.size(), teamId);
+        return getTeamMembers(teamId);
+    }
+
+    /** Remove a user from a team (unassigns user.teamId). */
+    @Transactional
+    public void removeTeamMember(UUID teamId, UUID userId) {
+        teamRepository.findById(teamId)
+                .orElseThrow(() -> new ResourceNotFoundException("Team", teamId));
+        com.testmgmt.entity.User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", userId));
+        if (user.getTeamId() != null && user.getTeamId().equals(teamId)) {
+            user.setTeamId(null);
+            userRepository.save(user);
+            log.info("Removed user {} from team {}", userId, teamId);
+        }
+    }
+
     private TeamResponse toResponse(Team team) {
         long memberCount = userRepository.countByTeamIdAndActiveTrue(team.getId());
         String leadName = null;

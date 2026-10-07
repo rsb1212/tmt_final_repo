@@ -41,6 +41,16 @@ public class RepositoryNodeDocument extends BaseEntity {
     @Column(name = "description", length = 500)
     private String description;
 
+    // Folder-upload metadata (columns added in V8 migration)
+    @Column(name = "relative_path", length = 1000)
+    private String relativePath;
+
+    @Column(name = "folder_name", length = 255)
+    private String folderName;
+
+    @Column(name = "uploaded_folder_name", length = 255)
+    private String uploadedFolderName;
+
     @Column(name = "version")
     @Builder.Default
     private Integer version = 1;

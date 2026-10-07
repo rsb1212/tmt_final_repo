@@ -60,7 +60,13 @@ public class ResponseDTOs {
         private String   fullName;
         private UserRole role;
         private String   team;
+        /** Team (UUID) this user is assigned to. Nullable = unassigned. */
+        private UUID     teamId;
         private Boolean  active;
+        /** chenges.md § Plan A — true when this user bypasses team isolation
+         *  (organization-wide visibility). Team Admins have role=ADMIN but
+         *  isSuperAdmin=false. */
+        private Boolean  isSuperAdmin;
         private Instant  createdAt;
     }
 
@@ -76,6 +82,9 @@ public class ResponseDTOs {
         private UserResponse          owner;
         private UUID                  parentProjectId;
         private String                parentProjectName;
+        /** Team that owns this project (null = shared). */
+        private UUID                  teamId;
+        private String                teamName;
         private List<ProjectResponse> subProjects;
     }
 

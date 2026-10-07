@@ -159,10 +159,11 @@ public class RepositoryModuleController {
             @RequestParam(required = false) UUID projectId,
             @RequestParam("file") MultipartFile file,
             @RequestParam(required = false) String description,
+            @RequestParam(required = false) String relativePath,
             @AuthenticationPrincipal User user) {
         try {
             RepositoryNodeDocument document = repositoryModuleService.uploadDocument(
-                    nodeId, projectId, file, description, user);
+                    nodeId, projectId, file, description, relativePath, user);
             return ResponseEntity.ok(ApiResponse.success(document));
         } catch (Exception e) {
             log.error("Error uploading document", e);

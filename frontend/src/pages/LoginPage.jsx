@@ -1,35 +1,57 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { useTheme } from '../hooks/useTheme';
-import { Eye, EyeOff, Shield, Sun, Moon, KeyRound } from 'lucide-react';
-import './LoginPage.css'
+import './LoginPage.css';
 import BatLogo from '../data/bajaj.png';
 
-export default function LoginPage() {
-  const { login, ssoLogin } = useAuth();
-  const { isDark, toggle }     = useTheme();
-  const navigate               = useNavigate();
-  const [form,    setForm]     = useState({ email: '', password: '' });
-  const [showPwd, setShowPwd]  = useState(false);
-  const [error,   setError]    = useState('');
-  const [loading, setLoading]  = useState(false);
-  const [idemLoading, setIdemLoading] = useState(false);
+/**
+ * LoginPage — IDEM SSO only.
+ *
+ * The local email/password form has been removed. Any visit to /login (or the
+ * root URL while unauthenticated) is redirected straight to the IDEM / RH-SSO
+ * OpenID Connect authorize endpoint via the backend:
+ *     GET /api/v1/auth/idem/login  →  302  →  Keycloak authorize URL
+ * The backend redirects back here on completion with either
+ *     ?sso=success&token=<jwt>&user=<base64-json>   or
+ *     ?sso=error&reason=<code>
+ *
+ * IMPORTANT — avoid the classic "SSO loop":
+ *   1. The redirect-to-IDEM effect must fire AT MOST ONCE per tab. Each call to
+ *      /idem/login creates a NEW HttpSession on the backend with a fresh
+ *      state + PKCE verifier; if the SPA fires it repeatedly (e.g. because
+ *      React 18 StrictMode double-invokes effects, the AuthProvider re-renders,
+ *      or the user has two tabs open), the "winning" callback loses its state
+ *      and the browser lands on /login?sso=error&reason=invalid_session.
+ *   2. We therefore (a) use a module-level ref that survives StrictMode's
+ *      double-invoke, (b) set a sessionStorage sentinel so a hard reload in the
+ *      same tab won't re-kick the flow within a short window, and (c) DO NOT
+ *      list `ssoLogin` / `navigate` in the effect deps — those are recreated
+ *      on every AuthProvider render and would otherwise re-fire the redirect.
+ */
 
-  // ── Handle IDEM / RH-SSO redirect callback ──────────────────────────────────
-  // After a successful SSO login the backend redirects here with
-  // ?sso=success&token=<jwt>&user=<base64-json>. Parse it, persist the session
-  // and continue into the app. On ?sso=error show a friendly message.
+// Module-level guard — survives React StrictMode's intentional double effect
+// invocation in dev. In prod builds StrictMode does not double-invoke effects,
+// but this is cheap defence in depth.
+let redirectedThisMount = false;
+
+export default function LoginPage() {
+  const { ssoLogin } = useAuth();
+  const navigate = useNavigate();
+  const [error, setError] = useState('');
+  const didRun = useRef(false);
+
   useEffect(() => {
+    if (didRun.current) return;   // guard against re-render
+    didRun.current = true;
+
     const params = new URLSearchParams(window.location.search);
     const sso = params.get('sso');
-    if (!sso) return;
 
+    // 1) Successful SSO callback — finish login and enter the app.
     if (sso === 'success') {
       try {
-        const token = params.get('token');
+        const token   = params.get('token');
         const userB64 = params.get('user');
-        // base64url → JSON
         const json = decodeURIComponent(
           atob(userB64.replace(/-/g, '+').replace(/_/g, '/'))
             .split('')
@@ -38,7 +60,7 @@ export default function LoginPage() {
         );
         const userData = JSON.parse(json);
         ssoLogin(token, userData);
-        // Clean the URL then enter the app.
+        sessionStorage.removeItem('tmt.idem.redirecting');
         window.history.replaceState({}, document.title, '/login');
         navigate('/');
       } catch (err) {
@@ -46,7 +68,11 @@ export default function LoginPage() {
         setError('Single sign-on failed. Please try again.');
         window.history.replaceState({}, document.title, '/login');
       }
-    } else if (sso === 'error') {
+      return;
+    }
+
+    // 2) SSO returned an error — show a friendly message, do NOT auto-loop.
+    if (sso === 'error') {
       const reason = params.get('reason') || 'unknown';
       const friendly = {
         user_not_registered:
@@ -57,130 +83,74 @@ export default function LoginPage() {
           'Your IDEM profile did not provide an email address. Please contact your administrator.',
       }[reason] || `Single sign-on failed (${reason}). Please try again.`;
       setError(friendly);
+      sessionStorage.removeItem('tmt.idem.redirecting');
       window.history.replaceState({}, document.title, '/login');
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
-  const doLogin = async (email, password) => {
-    setError('');
-    setLoading(true);
-    try {
-      await login(String(email), String(password));
-      navigate('/');
-    } catch (err) {
-      setError(err.response?.data?.message || 'Invalid email or password');
-    } finally {
-      setLoading(false);
+    // 3) Fresh visit — kick straight into the IDEM OIDC flow, but only once.
+    if (redirectedThisMount) return;
+    // 3a) If the user just clicked Logout, DO NOT auto-redirect. The Keycloak
+    // SSO cookie on the IdP is still alive and would silently re-authenticate
+    // them, making logout appear broken. Show the Sign-in button instead.
+    if (sessionStorage.getItem('tmt.loggedOut') === '1') {
+      setError('You have been signed out. Click below to sign in again.');
+      return;
     }
-  };
+    // Also skip if we already fired the redirect from this tab within the last
+    // 30s (protects against a hard reload racing the Keycloak round-trip).
+    const stamp = Number(sessionStorage.getItem('tmt.idem.redirecting') || 0);
+    if (stamp && Date.now() - stamp < 30_000) {
+      // Something is already in flight — just show the "redirecting" placeholder
+      // and let the browser navigate. Do NOT trigger another /idem/login.
+      return;
+    }
+    redirectedThisMount = true;
+    sessionStorage.setItem('tmt.idem.redirecting', String(Date.now()));
 
-  const handleSubmit = (e) => { e.preventDefault(); doLogin(form.email, form.password); };
-
-  // IDEM sign-in — ALWAYS redirect the browser to the IDEM / RH-SSO login page.
-  // The backend endpoint (GET /api/v1/auth/idem/login) starts the OIDC flow and
-  // redirects to Keycloak; after authentication it returns to /login with a
-  // ?sso=success&token=...&user=... payload (handled by the useEffect above).
-  const handleIdemLogin = () => {
-    setIdemLoading(true);
-    setError('');
     const base = import.meta.env.VITE_API_URL || '/api/v1';
-    // Full-page navigation (NOT axios) so the browser follows the 302 to Keycloak.
-    window.location.href = `${base}/auth/idem/login`;
-  };
+    window.location.replace(`${base}/auth/idem/login`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);   // <-- run once per mount; deps deliberately empty
 
   return (
     <div className="login-page">
-      {/* Animated background */}
       <div className="login-bg">
         <div className="grid-overlay" />
       </div>
 
-      {/* Day / Night toggle — top-right corner */}
-      <button className="login-theme-toggle" onClick={toggle}>
-        {isDark
-          ? <Sun  size={14} style={{ color: '#f59e0b' }} />
-          : <Moon size={14} style={{ color: '#6b2d45' }} />}
-        {isDark ? 'Light' : 'Dark'}
-      </button>
-
-      {/* Login card */}
-      <div className="login-card">
-
-        {/* Brand */}
+      <div className="login-card" style={{ textAlign: 'center' }}>
         <div className="login-brand">
           <div className="login-icon">
-            <img src={BatLogo} alt="Brand Logo" width={36} height={36} />
+            <img src={BatLogo} alt="Bajaj Life" width={36} height={36} />
           </div>
           <h1 className="login-title">Test Genii</h1>
-          <p className="login-sub">Intelligent Test Knowledge & Management Platform</p>
+          <p className="login-sub">Intelligent Test Knowledge &amp; Management Platform</p>
         </div>
 
-        {/* Error */}
-        {error && (
-          <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>
-        )}
-
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="login-form">
-          <div className="form-group">
-            <label>Email</label>
-            <input
-              type="email"
-              autoFocus
-              autoComplete="email"
-              placeholder="rahul@bajajlife.com"
-              value={form.email}
-              onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-              required
-            />
-          </div>
-
-          <div className="form-group" style={{ position: 'relative' }}>
-            <label>Password</label>
-            <input
-              type={showPwd ? 'text' : 'password'}
-              autoComplete="current-password"
-              placeholder="••••••••"
-              value={form.password}
-              onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-              required
-              style={{ paddingRight: 42 }}
-            />
+        {error ? (
+          <>
+            <div className="alert alert-error" style={{ margin: '16px 0' }}>{error}</div>
             <button
-              type="button"
-              onClick={() => setShowPwd(v => !v)}
-              style={{
-                position: 'absolute', right: 12, top: 34,
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: 'var(--text3)', padding: 2, display: 'flex',
+              className="login-btn"
+              onClick={() => {
+                sessionStorage.removeItem('tmt.idem.redirecting');
+                sessionStorage.removeItem('tmt.loggedOut');
+                redirectedThisMount = false;
+                const base = import.meta.env.VITE_API_URL || '/api/v1';
+                window.location.replace(`${base}/auth/idem/login`);
               }}
             >
-              {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
+              Try IDEM Sign-in Again
             </button>
-          </div>
-
-          <button type="submit" className="login-btn" disabled={loading || idemLoading}>
-            {loading ? 'Signing in…' : <><Shield size={15} /> Sign In</>}
-          </button>
-        </form>
-
-        {/* IDEM SSO Divider */}
-        <div className="idem-divider">
-          <span>OR</span>
-        </div>
-
-        {/* IDEM Authentication Button */}
-        <button 
-          className="idem-btn" 
-          onClick={handleIdemLogin}
-          disabled={loading || idemLoading}
-        >
-          {idemLoading ? 'Redirecting…' : <><KeyRound size={15} /> Sign in with IDEM</>}
-        </button>
+          </>
+        ) : (
+          <p style={{ marginTop: 24, color: 'var(--text3)' }}>
+            Redirecting to IDEM sign-in…
+          </p>
+        )}
 
         <div className="login-footer">
-          {/* Spring Boot 3.2 · React 18 · PostgreSQL 15 */}
           © 2026 Bajaj Life Insurance. All Rights Reserved.
         </div>
       </div>

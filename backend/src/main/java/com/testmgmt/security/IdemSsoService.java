@@ -212,9 +212,29 @@ public class IdemSsoService {
 
         log.info("User authenticated from IDEM: email='{}'", email);
 
-        User user = userRepository.findByEmail(email).orElse(null);
+        // Normalize — IDEM/AD claims commonly arrive mixed-case
+        // (e.g. "Someshwar.Phadatare@bajajallianz.co.in") whereas the DB stores
+        // the email lower-case, which made the previous case-sensitive
+        // findByEmail(..) miss and surface "user_not_registered" even when the
+        // user was actually provisioned.
+        final String emailNorm = email.trim();
+        final boolean looksLikeEmail = emailNorm.contains("@");
+
+        User user = userRepository.findByEmailIgnoreCase(emailNorm).orElse(null);
+        if (user == null && !looksLikeEmail) {
+            // Keycloak returned only the sAMAccountName (e.g. "Someshwar.Phadatare")
+            // in preferred_username — try matching that against the username column.
+            user = userRepository.findByUsernameIgnoreCase(emailNorm).orElse(null);
+        }
         if (user == null) {
-            log.warn("IDEM user not found in database — denying access: email='{}'", email);
+            // Last-chance fallback — some teams were onboarded with the
+            // sAMAccountName as the email local-part only. Try the local-part
+            // portion as a username.
+            String localPart = looksLikeEmail ? emailNorm.substring(0, emailNorm.indexOf('@')) : emailNorm;
+            user = userRepository.findByUsernameIgnoreCase(localPart).orElse(null);
+        }
+        if (user == null) {
+            log.warn("IDEM user not found in database — denying access: claim='{}'", emailNorm);
             throw new IdemLoginException("user_not_registered",
                     "User is not registered in the application. Please contact your administrator.");
         }
@@ -229,10 +249,17 @@ public class IdemSsoService {
                 email, user.getRole());
 
         // Keep the profile fresh on each login; the role ALWAYS comes from the DB.
+        // Case-insensitive compare so we don't flip-flop the username column
+        // between the DB (lower-case) and the IDEM claim (mixed-case) on every
+        // login.
         boolean dirty = false;
-        if (!email.equals(user.getUsername())) {
-            user.setUsername(email);
-            dirty = true;
+        if (user.getUsername() == null || !user.getUsername().equalsIgnoreCase(emailNorm)) {
+            // Only overwrite when the username really differs — and preserve
+            // whatever casing already exists in the DB when it matches.
+            if (user.getUsername() == null || user.getUsername().isBlank()) {
+                user.setUsername(emailNorm);
+                dirty = true;
+            }
         }
         if (fullName != null && !fullName.isBlank() && !fullName.equals(user.getFullName())) {
             user.setFullName(fullName);

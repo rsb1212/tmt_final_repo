@@ -152,6 +152,17 @@ public class RepositoryModuleService {
 
     public RepositoryNodeDocument uploadDocument(UUID nodeId, UUID projectId, MultipartFile file, 
                                                   String description, User uploadedBy) throws IOException {
+        return uploadDocument(nodeId, projectId, file, description, null, uploadedBy);
+    }
+
+    /**
+     * Upload a document; when {@code relativePath} is given (folder upload, e.g.
+     * "MyFolder/sub/a.pdf") the folder structure is preserved on disk and stored
+     * in the relative_path / folder_name / uploaded_folder_name columns.
+     */
+    public RepositoryNodeDocument uploadDocument(UUID nodeId, UUID projectId, MultipartFile file,
+                                                  String description, String relativePath,
+                                                  User uploadedBy) throws IOException {
         RepositoryNode node = nodeRepository.findById(nodeId)
                 .orElseThrow(() -> new RuntimeException("Node not found"));
 
@@ -162,6 +173,29 @@ public class RepositoryModuleService {
 
         // Create upload directory
         Path uploadPath = Paths.get(UPLOAD_DIR, node.getRepositoryModule().getName(), node.getPath());
+
+        // Folder upload: keep sub-folder structure, rejecting path traversal.
+        String folderName = null;
+        String uploadedFolderName = null;
+        if (relativePath != null && !relativePath.isBlank()) {
+            relativePath = relativePath.replace('\\', '/');
+            if (relativePath.contains("..")) {
+                throw new IllegalArgumentException("Invalid relative path");
+            }
+            int lastSlash = relativePath.lastIndexOf('/');
+            if (lastSlash > 0) {
+                String folderPart = relativePath.substring(0, lastSlash);
+                uploadedFolderName = folderPart.contains("/")
+                        ? folderPart.substring(0, folderPart.indexOf('/')) : folderPart;
+                folderName = folderPart.contains("/")
+                        ? folderPart.substring(folderPart.lastIndexOf('/') + 1) : folderPart;
+                Path resolved = uploadPath.resolve(folderPart).normalize();
+                if (!resolved.startsWith(uploadPath.normalize())) {
+                    throw new IllegalArgumentException("Invalid relative path");
+                }
+                uploadPath = resolved;
+            }
+        }
         Files.createDirectories(uploadPath);
 
         // Generate unique filename
@@ -181,6 +215,9 @@ public class RepositoryModuleService {
                 .contentType(file.getContentType())
                 .version(1)
                 .description(description)
+                .relativePath(relativePath)
+                .folderName(folderName)
+                .uploadedFolderName(uploadedFolderName)
                 .status("ACTIVE")
                 .uploadedAt(java.time.Instant.now())
                 .repositoryNode(node)

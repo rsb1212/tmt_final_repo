@@ -52,6 +52,7 @@ public class TestCaseService {
     private final AttachmentRepository    attachmentRepository;
     private final DefectRepository        defectRepository;
     private final StepExecutionRepository stepExecutionRepository;
+    private final TeamAccessGuard         teamAccessGuard;
 
     @Transactional
     @Caching(evict = {
@@ -64,6 +65,10 @@ public class TestCaseService {
     public TestCaseResponse create(CreateTestCaseRequest request, String creatorEmail) {
         Project project = projectRepository.findById(request.getProjectId())
                 .orElseThrow(() -> new ResourceNotFoundException("Project", request.getProjectId()));
+
+        // chenges.md § Plan A — a non-super-admin may only create test cases
+        // under projects owned by their own team.
+        teamAccessGuard.assertProjectAccess(project.getId());
 
         if (testCaseRepository.existsByTitleAndProject(request.getTitle(), project)) {
             throw new ConflictException("A test case with this title already exists in the project.");
@@ -118,6 +123,10 @@ public class TestCaseService {
      */
     public Page<TestCaseResponse> findAll(UUID projectId, TestStatus status,
             UUID assignedToUserId, String module, Pageable pageable) {
+        // chenges.md § Plan A — scope list to the caller's team unless they are
+        // a super-admin (TeamAccessGuard returns Optional.empty() in that case).
+        java.util.Optional<UUID> restrictTeamId = teamAccessGuard.currentUserTeamIdIfRestricted();
+
         // If assignedToUserId is set — return that tester's cases
         if (assignedToUserId != null) {
             User tester = userRepository.findById(assignedToUserId)
@@ -125,6 +134,14 @@ public class TestCaseService {
             List<com.testmgmt.entity.TestCase> cases = (projectId != null)
                     ? testCaseRepository.findByAssignedToWithProject(tester, projectId)
                     : testCaseRepository.findByAssignedTo(tester);
+            if (restrictTeamId.isPresent()) {
+                UUID tid = restrictTeamId.get();
+                cases = cases.stream()
+                        .filter(tc -> tc.getProject() == null
+                                   || tc.getProject().getTeamId() == null
+                                   || tid.equals(tc.getProject().getTeamId()))
+                        .toList();
+            }
             // Convert to page manually
             int start = (int) pageable.getOffset();
             int end   = Math.min(start + pageable.getPageSize(), cases.size());
@@ -135,6 +152,9 @@ public class TestCaseService {
         }
 
         if (projectId != null) {
+            // Enforce access up-front so cross-team project IDs 403 instead of
+            // leaking an empty page (which could be misinterpreted as "no data").
+            teamAccessGuard.assertProjectAccess(projectId);
             Project project = projectRepository.findById(projectId)
                     .orElseThrow(() -> new ResourceNotFoundException("Project", projectId));
             if (status != null) {
@@ -144,7 +164,22 @@ public class TestCaseService {
             return testCaseRepository.findByProject(project, pageable)
                     .map(TestCaseService::toResponse);
         }
-        return testCaseRepository.findAll(pageable).map(TestCaseService::toResponse);
+
+        // No projectId filter — hard-cap non-super-admins to their own team's
+        // test cases. We filter the Page content in-memory; the result set is
+        // bounded by `pageable` so the overhead is negligible.
+        Page<TestCase> all = testCaseRepository.findAll(pageable);
+        if (restrictTeamId.isEmpty()) {
+            return all.map(TestCaseService::toResponse);
+        }
+        UUID tid = restrictTeamId.get();
+        List<TestCaseResponse> filtered = all.getContent().stream()
+                .filter(tc -> tc.getProject() == null
+                           || tc.getProject().getTeamId() == null
+                           || tid.equals(tc.getProject().getTeamId()))
+                .map(TestCaseService::toResponse)
+                .toList();
+        return new org.springframework.data.domain.PageImpl<>(filtered, pageable, filtered.size());
     }
 
     /** Backward-compat overload */
@@ -154,6 +189,7 @@ public class TestCaseService {
 
     @Transactional(readOnly = true)
     public TestCaseResponse findById(UUID id) {
+        teamAccessGuard.assertTestCaseAccess(id);
         return toResponse(testCaseRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("TestCase", id)));
     }
@@ -167,6 +203,7 @@ public class TestCaseService {
         @CacheEvict(value = "search",           allEntries = true),
     })
     public TestCaseResponse update(UUID id, CreateTestCaseRequest request, String updaterEmail) {
+        teamAccessGuard.assertTestCaseAccess(id);
         TestCase tc = testCaseRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("TestCase", id));
 
@@ -196,6 +233,7 @@ public class TestCaseService {
         @CacheEvict(value = "search",           allEntries = true),
     })
     public void delete(UUID id) {
+        teamAccessGuard.assertTestCaseAccess(id);
         com.testmgmt.entity.TestCase tc = testCaseRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("TestCase", id));
 

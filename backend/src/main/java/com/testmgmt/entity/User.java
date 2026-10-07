@@ -47,4 +47,21 @@ public class User extends BaseEntity {
     @Column(name = "active", nullable = false)
     @Builder.Default
     private Boolean active = true;
+
+    /**
+     * Super-Admin flag (chenges.md § Plan A).
+     * <p>
+     * When {@code true} the user bypasses all team-isolation checks and sees
+     * organization-wide data (all teams, projects, dashboards, reports).
+     * When {@code false} the user is scoped to their own {@link #teamId} —
+     * including users whose {@link #role} is {@link UserRole#ADMIN} (they
+     * become a "Team Admin" per the enterprise access model).
+     * <p>
+     * Defaults to {@code false}; the V10 Flyway migration backfills existing
+     * ADMIN rows to {@code true} to preserve current behaviour until the DBA
+     * demotes team-admins.
+     */
+    @Column(name = "is_super_admin", nullable = false)
+    @Builder.Default
+    private Boolean isSuperAdmin = false;
 }

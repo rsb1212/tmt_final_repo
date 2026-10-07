@@ -10,11 +10,13 @@ export default function TenantSelector() {
   const dropdownRef = useRef(null);
 
   useEffect(() => {
-    // Load tenants list when component mounts (for admins)
-    if (user?.role === 'ADMIN' && tenants.length === 0) {
+    // Load tenants list when component mounts — only for Super Admins per
+    // chenges.md § Plan A. Team Admins are scoped to their own team and do
+    // not switch tenants.
+    if (user?.isSuperAdmin === true && tenants.length === 0) {
       loadTenants();
     }
-  }, [user?.role]);
+  }, [user?.isSuperAdmin]);
 
   // Close dropdown when clicking outside
   useEffect(() => {

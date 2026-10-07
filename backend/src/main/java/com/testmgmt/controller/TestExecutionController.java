@@ -5,6 +5,7 @@ import com.testmgmt.dto.request.ExecutionDTOs.UpdateExecutionRequest;
 import com.testmgmt.dto.response.ExecutionResponseDTOs.*;
 import com.testmgmt.dto.response.ResponseDTOs.ApiResponse;
 import com.testmgmt.enums.ExecResult;
+import com.testmgmt.service.TeamAccessGuard;
 import com.testmgmt.service.TestExecutionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -30,6 +31,7 @@ import java.util.UUID;
 public class TestExecutionController {
 
     private final TestExecutionService executionService;
+    private final TeamAccessGuard      teamAccessGuard;
 
     // ── Submit a new execution ────────────────────────────────────────────────
 
@@ -44,6 +46,7 @@ public class TestExecutionController {
     public ResponseEntity<ApiResponse<TestExecutionResponse>> submit(
             @Valid @RequestBody SubmitExecutionRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
+        teamAccessGuard.assertTestCaseAccess(request.getTestCaseId());
         return ResponseEntity.status(HttpStatus.CREATED).body(
                 ApiResponse.success("Execution recorded",
                         executionService.submit(request, userDetails.getUsername())));
@@ -58,6 +61,7 @@ public class TestExecutionController {
             @PathVariable UUID id,
             @RequestBody UpdateExecutionRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
+        teamAccessGuard.assertExecutionAccess(id);
         return ResponseEntity.ok(ApiResponse.success(
                 executionService.update(id, request, userDetails.getUsername())));
     }
@@ -67,6 +71,7 @@ public class TestExecutionController {
     @GetMapping("/{id}")
     @Operation(summary = "Get a single execution record with step-level results")
     public ResponseEntity<ApiResponse<TestExecutionResponse>> getById(@PathVariable UUID id) {
+        teamAccessGuard.assertExecutionAccess(id);
         return ResponseEntity.ok(ApiResponse.success(executionService.getById(id)));
     }
 
@@ -80,6 +85,7 @@ public class TestExecutionController {
     )
     public ResponseEntity<ApiResponse<ExecutionHistoryResponse>> getHistory(
             @PathVariable UUID testCaseId) {
+        teamAccessGuard.assertTestCaseAccess(testCaseId);
         return ResponseEntity.ok(ApiResponse.success(
                 executionService.getHistoryForTestCase(testCaseId)));
     }
@@ -98,6 +104,7 @@ public class TestExecutionController {
             @RequestParam(required = false) ExecResult result,
             @RequestParam(defaultValue = "0")  int page,
             @RequestParam(defaultValue = "25") int size) {
+        teamAccessGuard.assertProjectAccess(projectId);
         return ResponseEntity.ok(ApiResponse.success(
                 executionService.listExecutions(projectId, userId, result,
                         PageRequest.of(page, size, Sort.by("executedAt").descending()))));
@@ -114,6 +121,7 @@ public class TestExecutionController {
     )
     public ResponseEntity<ApiResponse<ExecutionSummaryResponse>> getSummary(
             @RequestParam UUID projectId) {
+        teamAccessGuard.assertProjectAccess(projectId);
         return ResponseEntity.ok(ApiResponse.success(
                 executionService.getSummary(projectId)));
     }
@@ -126,6 +134,7 @@ public class TestExecutionController {
     public ResponseEntity<ApiResponse<Void>> delete(
             @PathVariable UUID id,
             @AuthenticationPrincipal UserDetails userDetails) {
+        teamAccessGuard.assertExecutionAccess(id);
         executionService.delete(id, userDetails.getUsername());
         return ResponseEntity.ok(ApiResponse.ok("Execution deleted"));
     }

@@ -24,10 +24,12 @@ import TenantsPage            from './pages/TenantsPage';
 import SmeDashboardPage       from './pages/SmeDashboardPage';
 import Layout                 from './components/Layout';
 
-function ProtectedRoute({ children, roles }) {
+function ProtectedRoute({ children, roles, superAdminOnly }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="loading">Loading…</div>;
   if (!user)   return <Navigate to="/login" replace />;
+  // chenges.md § Plan A — a route may require true super-admin (not just role=ADMIN).
+  if (superAdminOnly && user.isSuperAdmin !== true) return <Navigate to="/" replace />;
   if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
   return children;
 }
@@ -98,7 +100,7 @@ export default function App() {
 
             {/* ── Tenant Management (Admin only) ── */}
             <Route path="tenants" element={
-              <ProtectedRoute roles={['ADMIN']}><TenantsPage /></ProtectedRoute>
+              <ProtectedRoute superAdminOnly><TenantsPage /></ProtectedRoute>
             }/>
           </Route>
         </Routes>

@@ -51,7 +51,8 @@ public class TeamController {
      * Create a new team
      */
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    // OLD: @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    @PreAuthorize("@superAdminGuard.check()")
     public ResponseEntity<ApiResponse<TeamResponse>> createTeam(@RequestBody TeamRequest request) {
         return ResponseEntity.ok(ApiResponse.success(teamService.createTeam(request)));
     }
@@ -60,7 +61,8 @@ public class TeamController {
      * Update team
      */
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    // OLD: @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    @PreAuthorize("@superAdminGuard.check()")
     public ResponseEntity<ApiResponse<TeamResponse>> updateTeam(
             @PathVariable UUID id,
             @RequestBody TeamRequest request) {
@@ -71,7 +73,8 @@ public class TeamController {
      * Delete team (soft delete)
      */
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    // OLD: @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("@superAdminGuard.check()")
     public ResponseEntity<ApiResponse<Void>> deleteTeam(@PathVariable UUID id) {
         teamService.deleteTeam(id);
         return ResponseEntity.ok(ApiResponse.success(null));
@@ -110,5 +113,39 @@ public class TeamController {
     @GetMapping("/{id}/member-count")
     public ResponseEntity<ApiResponse<Long>> getTeamMemberCount(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success(teamService.getTeamMemberCount(id)));
+    }
+
+    // ── Team Member Management ───────────────────────────────────────────────
+
+    /** List active members of a team. */
+    @GetMapping("/{id}/members")
+    public ResponseEntity<ApiResponse<List<com.testmgmt.dto.response.ResponseDTOs.UserResponse>>>
+            getTeamMembers(@PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.success(teamService.getTeamMembers(id)));
+    }
+
+    /** Add one or more users to this team. Body: {"userIds":["uuid1","uuid2"]} */
+    @PostMapping("/{id}/members")
+    // OLD: @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    @PreAuthorize("@superAdminGuard.check()")
+    public ResponseEntity<ApiResponse<List<com.testmgmt.dto.response.ResponseDTOs.UserResponse>>>
+            addTeamMembers(@PathVariable UUID id, @RequestBody AddMembersRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(
+                teamService.addTeamMembers(id, request.getUserIds())));
+    }
+
+    /** Remove a user from this team. */
+    @DeleteMapping("/{id}/members/{userId}")
+    // OLD: @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    @PreAuthorize("@superAdminGuard.check()")
+    public ResponseEntity<ApiResponse<Void>> removeTeamMember(
+            @PathVariable UUID id, @PathVariable UUID userId) {
+        teamService.removeTeamMember(id, userId);
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
+    @lombok.Data
+    public static class AddMembersRequest {
+        private List<UUID> userIds;
     }
 }

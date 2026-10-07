@@ -3,7 +3,8 @@ import Keycloak from 'keycloak-js';
 const keycloak = new Keycloak({
   url:
     import.meta.env.VITE_KEYCLOAK_URL ||
-    'https://secure-sso-rhsso-np.apps.ocplife-np.bajajlife.com/auth',
+    // OLD (NP): 'https://secure-sso-rhsso-np.apps.ocplife-np.bajajlife.com/auth',
+    'https://sso-rhsso-prod.apps.ocplife.bajajlife.com/auth',
   realm:
     import.meta.env.VITE_KEYCLOAK_REALM ||
     'internal',

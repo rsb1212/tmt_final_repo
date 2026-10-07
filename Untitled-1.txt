@@ -1,3 +1,0 @@
-Tomcat started on port(s): 8080 (http)
-Started TestManagementApplication in 166.811 seconds
-Default admin creation is disabled. Set DEFAULT_ADMIN_ENABLED=true to create.

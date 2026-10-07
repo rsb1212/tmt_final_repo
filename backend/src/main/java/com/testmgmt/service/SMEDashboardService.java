@@ -1,24 +1,40 @@
 package com.testmgmt.service;
 
-import com.testmgmt.dto.response.ResponseDTOs.*;
-import com.testmgmt.entity.Module;
-import com.testmgmt.entity.Project;
-import com.testmgmt.entity.SmeModuleAssignment;
-import com.testmgmt.entity.TestCase;
-import com.testmgmt.entity.User;
-import com.testmgmt.enums.TestStatus;
-import com.testmgmt.enums.UserRole;
-import com.testmgmt.exception.ResourceNotFoundException;
-import com.testmgmt.repository.*;
-import lombok.RequiredArgsConstructor;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import com.testmgmt.service.TestCaseService;
 
-import java.util.*;
-import java.util.stream.Collectors;
+import com.testmgmt.dto.response.ResponseDTOs.*;
+import com.testmgmt.dto.response.ResponseDTOs.ModuleResponse;
+import com.testmgmt.dto.response.ResponseDTOs.SMEDashboardResponse;
+import com.testmgmt.dto.response.ResponseDTOs.SMEDepartmentSummary;
+import com.testmgmt.dto.response.ResponseDTOs.SmeModuleDashboardResponse;
+import com.testmgmt.dto.response.ResponseDTOs.SmeModuleStats;
+import com.testmgmt.dto.response.ResponseDTOs.TestCaseResponse;
+import com.testmgmt.dto.response.ResponseDTOs.UserResponse;
+import com.testmgmt.entity.Module;
+import com.testmgmt.entity.Project;
+import com.testmgmt.entity.SmeModuleAssignment;
+import com.testmgmt.entity.User;
+import com.testmgmt.enums.TestStatus;
+import com.testmgmt.enums.UserRole;
+import com.testmgmt.exception.ResourceNotFoundException;
+import com.testmgmt.repository.ModuleRepository;
+import com.testmgmt.repository.ProjectRepository;
+import com.testmgmt.repository.SmeModuleAssignmentRepository;
+import com.testmgmt.repository.TestCaseRepository;
+import com.testmgmt.repository.UserRepository;
+
+import lombok.RequiredArgsConstructor;
 
 /**
  * SME Dashboard — Department-wise and Module-wise test case bifurcation.

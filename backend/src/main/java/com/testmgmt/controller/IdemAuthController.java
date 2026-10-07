@@ -51,7 +51,7 @@ public class IdemAuthController {
 
     private final IdemSsoService idemSsoService;
     private final IdemAuthService idemAuthService;
-    private final ObjectMapper   objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
 
     @Value("${app.idem.enabled:true}")
     private boolean idemEnabled;

@@ -43,6 +43,7 @@ public class SearchService {
     private final TestCaseRepository   testCaseRepository;
     private final DefectRepository     defectRepository;
     private final CallNumberRepository callNumberRepository;  // Issue #16, #29: Search by call number
+    private final TeamAccessGuard      teamAccessGuard;       // chenges.md § 6 — team-scoped search
 
     /**
      * Two-character prefix → known-empty flag.
@@ -52,10 +53,16 @@ public class SearchService {
     private final Set<String> emptyPrefixCache =
             Collections.newSetFromMap(new ConcurrentHashMap<>(1024));
 
-    @Cacheable(value = "search", key = "#query + ':' + (#projectId != null ? #projectId : 'all')")
+    // NOTE: cache key includes the caller's email so different teams don't share cached results.
+    @Cacheable(value = "search", key = "#email + ':' + #query + ':' + (#projectId != null ? #projectId : 'all')")
     @Transactional(readOnly = true)
     public List<SearchResultResponse> search(String query, UUID projectId, String email) {
         if (query == null || query.trim().length() < 2) return List.of();
+
+        // Enforce team boundary if a specific project was requested
+        if (projectId != null) {
+            teamAccessGuard.assertProjectAccess(projectId);
+        }
 
         String trimmed = query.trim().toLowerCase();
         String prefix2 = trimmed.substring(0, Math.min(2, trimmed.length()));
@@ -71,6 +78,8 @@ public class SearchService {
         List<SearchResultResponse> results = new ArrayList<>(30);
 
         testCaseRepository.searchByQuery(q, projectId, PageRequest.of(0, 20))
+                .stream()
+                .filter(tc -> teamAccessGuard.canAccessProject(tc.getProject()))
                 .forEach(tc -> results.add(SearchResultResponse.builder()
                         .type("TEST_CASE")
                         .id(tc.getId())
@@ -83,6 +92,8 @@ public class SearchService {
 
         // Issue #16, #29: Also search by call number code
         testCaseRepository.findByCallNumberCode(trimmed, projectId, PageRequest.of(0, 10))
+                .stream()
+                .filter(tc -> teamAccessGuard.canAccessProject(tc.getProject()))
                 .forEach(tc -> {
                     // Avoid duplicates if already found in title/code search
                     if (results.stream().noneMatch(r -> r.getId().equals(tc.getId()))) {
@@ -100,6 +111,8 @@ public class SearchService {
 
         // Also include call numbers themselves in search results
         callNumberRepository.searchGlobally(trimmed, PageRequest.of(0, 5))
+                .stream()
+                .filter(cn -> teamAccessGuard.canAccessProject(cn.getProject()))
                 .forEach(cn -> results.add(SearchResultResponse.builder()
                         .type("CALL_NUMBER")
                         .id(cn.getId())
@@ -110,6 +123,8 @@ public class SearchService {
                         .build()));
 
         defectRepository.searchByQuery(q, projectId, PageRequest.of(0, 10))
+                .stream()
+                .filter(d -> teamAccessGuard.canAccessProject(d.getProject()))
                 .forEach(d -> results.add(SearchResultResponse.builder()
                         .type("DEFECT")
                         .id(d.getId())

@@ -23,14 +23,39 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle 401 globally
+// Handle 401 globally.
+//
+// IMPORTANT: do NOT blindly redirect to /login on every 401 — because the
+// /login page auto-triggers /api/v1/auth/idem/login, and Keycloak's own
+// session is still alive, a single stray 401 would otherwise send the user
+// into an endless SSO loop:
+//   dashboard → 401 → /login → /idem/login → /idem/callback → /?sso=success
+//     → dashboard → 401 → /login → ...
+// We therefore skip the redirect when:
+//   • the response is for an auth endpoint itself,
+//   • the user is already sitting on /login (loop guard),
+//   • or we've already triggered a redirect within the last 2 seconds.
+let lastAuthRedirectAt = 0;
 api.interceptors.response.use(
   (res) => res,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('tenantId');
-      window.location.href = '/login';
+    const status = error.response?.status;
+    const url    = error.config?.url || '';
+    const onLoginPage = window.location.pathname.startsWith('/login');
+    const isAuthCall  = url.includes('/auth/');
+
+    if (status === 401 && !onLoginPage && !isAuthCall) {
+      const now = Date.now();
+      if (now - lastAuthRedirectAt > 2000) {
+        lastAuthRedirectAt = now;
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        localStorage.removeItem('tenant');
+        localStorage.removeItem('tenantId');
+        // Use assign (not replace) so the browser history still shows the
+        // page that triggered the 401 — easier to diagnose.
+        window.location.assign('/login');
+      }
     }
     return Promise.reject(error);
   }
@@ -66,6 +91,10 @@ export const teamApi = {
   byChannel:      (channel)       => api.get(`/teams/by-channel/${channel}`),
   search:         (query)         => api.get(`/teams/search`, { params: { q: query } }),
   memberCount:    (id)            => api.get(`/teams/${id}/member-count`),
+  // Team member management
+  members:        (id)            => api.get(`/teams/${id}/members`),
+  addMembers:     (id, userIds)   => api.post(`/teams/${id}/members`, { userIds }),
+  removeMember:   (id, userId)    => api.delete(`/teams/${id}/members/${userId}`),
 };
 
 // ── Projects ──────────────────────────────────────────────────────────────────

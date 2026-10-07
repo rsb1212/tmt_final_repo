@@ -13,22 +13,19 @@ RUN mvn -B -q dependency:go-offline || true
 # 2) Now copy the sources and build.
 COPY src ./src
 RUN mvn -B -q clean package -DskipTests \
- && cp target/test-management-tool-*.jar app.jar
+    && cp target/test-management-tool-*.jar app.jar
 
 # ── Runtime stage ────────────────────────────────────────────────────────────
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
-
 # curl is used by HEALTHCHECK; tini provides proper PID-1 signal handling
 # so Spring Boot's graceful shutdown actually fires on `docker stop`.
 RUN apk add --no-cache curl tini
-
 # Non-root user + writable dirs
 RUN addgroup -g 1001 appgroup \
- && adduser -u 1001 -G appgroup -D appuser \
- && mkdir -p /app/uploads /app/logs \
- && chown -R appuser:appgroup /app
-
+    && adduser -u 1001 -G appgroup -D appuser \
+    && mkdir -p /app/uploads /app/logs \
+    && chown -R appuser:appgroup /app
 COPY --from=build --chown=appuser:appgroup /app/app.jar /app/app.jar
 
 USER appuser
@@ -42,4 +39,3 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -fsS http://localhost:8080/api/v1/health || exit 1
 
 ENTRYPOINT ["/sbin/tini", "--", "sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]
-

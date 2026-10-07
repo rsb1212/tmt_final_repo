@@ -2,6 +2,7 @@ package com.testmgmt.controller;
 
 import com.testmgmt.dto.response.ResponseDTOs.ApiResponse;
 import com.testmgmt.dto.response.TesterProductivityDTOs.*;
+import com.testmgmt.service.TeamAccessGuard;
 import com.testmgmt.service.TesterProductivityService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -25,6 +26,7 @@ import java.util.UUID;
 public class TesterProductivityController {
 
     private final TesterProductivityService productivityService;
+    private final TeamAccessGuard           teamAccessGuard;
 
     // ── Existing: team summary ────────────────────────────────────────────────
 
@@ -35,6 +37,7 @@ public class TesterProductivityController {
                              "with optional filter by project. Includes per-module breakdown.")
     public ResponseEntity<ApiResponse<TeamProductivitySummaryResponse>> getTeamProductivity(
             @RequestParam(required = false) UUID projectId) {
+        teamAccessGuard.assertProjectAccess(projectId);
         return ResponseEntity.ok(
                 ApiResponse.success(productivityService.getTeamProductivity(projectId)));
     }
@@ -47,6 +50,7 @@ public class TesterProductivityController {
     public ResponseEntity<ApiResponse<TesterProductivityResponse>> getTesterProductivity(
             @PathVariable UUID userId,
             @RequestParam(required = false) UUID projectId) {
+        teamAccessGuard.assertProjectAccess(projectId);
         return ResponseEntity.ok(
                 ApiResponse.success(productivityService.getTesterProductivity(userId, projectId)));
     }
@@ -62,6 +66,7 @@ public class TesterProductivityController {
     public ResponseEntity<ApiResponse<TesterProductivityResponse>> getMyProductivity(
             @AuthenticationPrincipal UserDetails userDetails,
             @RequestParam(required = false) UUID projectId) {
+        teamAccessGuard.assertProjectAccess(projectId);
         // Resolve the caller's user ID from the UserRepository via email
         return ResponseEntity.ok(
                 ApiResponse.success(

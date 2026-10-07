@@ -26,6 +26,14 @@ public interface PdCrCallRepository extends JpaRepository<PdCrCall, UUID> {
     /**
      * Flexible, null-friendly filter used by the list endpoint. Any of the
      * filter params may be null to mean "don't filter on this field".
+     *
+     * NOTE: {@code :owner} and {@code :q} are explicitly CAST to string. On
+     * PostgreSQL, a null String parameter that is only ever used as an argument
+     * to LOWER()/LIKE cannot have its type inferred by Hibernate, so it is bound
+     * as an untyped null which Postgres resolves to {@code bytea}. That makes
+     * {@code lower(?)} fail with "function lower(bytea) does not exist"
+     * (SQLState 42883) and the whole endpoint returns HTTP 500. The CAST forces
+     * a known VARCHAR type so the query works whether the value is null or not.
      */
     @Query("""
             SELECT c FROM PdCrCall c
@@ -33,11 +41,11 @@ public interface PdCrCallRepository extends JpaRepository<PdCrCall, UUID> {
               AND (:projectId IS NULL OR c.project.id = :projectId)
               AND (:callType  IS NULL OR c.callType   = :callType)
               AND (:status    IS NULL OR c.status     = :status)
-              AND (:owner     IS NULL OR LOWER(c.applicationOwner) = LOWER(:owner))
-              AND (:q IS NULL OR
-                   LOWER(c.childCallId)      LIKE LOWER(CONCAT('%', :q, '%')) OR
-                   LOWER(c.issueDescription) LIKE LOWER(CONCAT('%', :q, '%')) OR
-                   LOWER(c.uatSpoc)          LIKE LOWER(CONCAT('%', :q, '%')))
+              AND (CAST(:owner AS string) IS NULL OR LOWER(c.applicationOwner) = LOWER(CAST(:owner AS string)))
+              AND (CAST(:q AS string) IS NULL OR
+                   LOWER(c.childCallId)      LIKE LOWER(CONCAT('%', CAST(:q AS string), '%')) OR
+                   LOWER(c.issueDescription) LIKE LOWER(CONCAT('%', CAST(:q AS string), '%')) OR
+                   LOWER(c.uatSpoc)          LIKE LOWER(CONCAT('%', CAST(:q AS string), '%')))
             """)
     Page<PdCrCall> search(@Param("projectId") UUID projectId,
                           @Param("callType") PdCrCallType callType,

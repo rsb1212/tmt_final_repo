@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useTheme } from '../hooks/useTheme';
+import { teamApi } from '../api';
 import {
   LayoutDashboard, FolderKanban, ClipboardList, Bug, GitBranch, Phone,
   BarChart2, PlayCircle, Users, LogOut, ChevronRight, ChevronLeft,
@@ -54,7 +55,9 @@ const NAV_SECTIONS = [
   {
     label: 'Administration',
     items: [
-      { to: '/tenants', icon: Building2, label: 'Tenants', roles: ['ADMIN'] },
+      // Tenants is organisation-wide — only Super Admins may see it.
+      // Team Admins (role=ADMIN, isSuperAdmin=false) are scoped to their own team.
+      { to: '/tenants', icon: Building2, label: 'Tenants', superAdminOnly: true },
     ],
   },
 ];
@@ -86,6 +89,18 @@ export default function Layout() {
 
   const palette = isDark ? ROLE_STYLES_DARK : ROLE_STYLES;
   const rs = palette[user?.role] || palette.VIEWER;
+
+  // Team the logged-in user belongs to — shown next to the name in the topbar.
+  // user.team holds the team CODE; resolve the display name from teamId.
+  const [teamName, setTeamName] = useState(null);
+  useEffect(() => {
+    if (!user?.teamId) { setTeamName(user?.team || null); return; }
+    let cancelled = false;
+    teamApi.get(user.teamId)
+      .then(({ data }) => { if (!cancelled) setTeamName(data?.data?.name || user?.team || null); })
+      .catch(() => { if (!cancelled) setTeamName(user?.team || null); });
+    return () => { cancelled = true; };
+  }, [user?.teamId, user?.team]);
 
   return (
     <div className="layout">
@@ -119,9 +134,12 @@ export default function Layout() {
         {/* Navigation */}
         <nav className="sidebar-nav">
           {NAV_SECTIONS.map(section => {
-            const visible = section.items.filter(
-              item => !item.roles || item.roles.includes(user?.role)
-            );
+            const isSuper = user?.isSuperAdmin === true;
+            const visible = section.items.filter(item => {
+              if (item.superAdminOnly && !isSuper) return false;
+              if (item.roles && !item.roles.includes(user?.role)) return false;
+              return true;
+            });
             if (!visible.length) return null;
             return (
               <div key={section.label} className="nav-section">
@@ -205,6 +223,16 @@ export default function Layout() {
               <span className="role-dot" style={{ background: rs.dot }} />
               {user?.fullName?.split(' ')[0] || user?.username}
             </div>
+            {teamName && (
+              <div
+                className="topbar-user-pill"
+                title={`Team: ${teamName}`}
+                style={{ background: 'var(--bg-raised)', color: 'var(--text2)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 5 }}
+              >
+                <Users size={12} />
+                {teamName}
+              </div>
+            )}
           </div>
         </header>
 

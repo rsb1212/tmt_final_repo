@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { 
   Building2, Plus, Edit2, Trash2, X, Save, Power, PowerOff,
   Users, FolderKanban, Search, ChevronDown, ChevronRight,
-  Settings, Layers, RefreshCw
+  Settings, Layers, RefreshCw, UserPlus, UserMinus
 } from 'lucide-react';
 import { tenantApi, teamApi, userApi } from '../api';
 import { useAuth } from '../hooks/useAuth';
@@ -25,6 +25,14 @@ export default function TenantsPage() {
   
   // Expanded teams for viewing members
   const [expandedTeams, setExpandedTeams] = useState({});
+
+  // Manage-Members modal state
+  const [showMembersModal, setShowMembersModal] = useState(false);
+  const [membersTeam, setMembersTeam] = useState(null);
+  const [membersList, setMembersList] = useState([]);
+  const [selectedUserIds, setSelectedUserIds] = useState([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [memberSearch, setMemberSearch] = useState('');
   
   // Form state for organization
   const [orgFormData, setOrgFormData] = useState({
@@ -181,6 +189,59 @@ export default function TenantsPage() {
 
   const getTeamMembers = (teamId) => {
     return users.filter(u => u.teamId === teamId);
+  };
+
+  // ─── Team Members Management ────────────────────────────────────────────────
+  const openMembersModal = async (team) => {
+    setMembersTeam(team);
+    setShowMembersModal(true);
+    setSelectedUserIds([]);
+    setMemberSearch('');
+    await refreshMembers(team.id);
+  };
+
+  const refreshMembers = async (teamId) => {
+    try {
+      setMembersLoading(true);
+      const res = await teamApi.members(teamId);
+      setMembersList(res.data?.data || []);
+    } catch (err) {
+      console.error('Failed to load team members', err);
+      setMembersList([]);
+    } finally {
+      setMembersLoading(false);
+    }
+  };
+
+  const handleAddMembers = async () => {
+    if (!membersTeam || selectedUserIds.length === 0) return;
+    try {
+      await teamApi.addMembers(membersTeam.id, selectedUserIds);
+      setSelectedUserIds([]);
+      await refreshMembers(membersTeam.id);
+      await loadData(); // refresh member counts & user.teamId in users list
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to add members');
+    }
+  };
+
+  const handleRemoveMember = async (userId) => {
+    if (!membersTeam) return;
+    if (!window.confirm('Remove this user from the team?')) return;
+    try {
+      await teamApi.removeMember(membersTeam.id, userId);
+      await refreshMembers(membersTeam.id);
+      await loadData();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to remove member');
+    }
+  };
+
+  const closeMembersModal = () => {
+    setShowMembersModal(false);
+    setMembersTeam(null);
+    setMembersList([]);
+    setSelectedUserIds([]);
   };
 
   const filteredTeams = teams.filter(team =>
@@ -357,6 +418,14 @@ export default function TenantsPage() {
                         </div>
 
                         <div style={{ display: 'flex', gap: '0.5rem' }} onClick={e => e.stopPropagation()}>
+                          <button
+                            className="btn btn-primary"
+                            title="Manage Members"
+                            onClick={() => openMembersModal(team)}
+                            style={{ padding: '0.5rem 0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                          >
+                            <UserPlus size={16} /> Manage Members
+                          </button>
                           <button 
                             className="btn btn-secondary" 
                             title="Edit Team"
@@ -677,6 +746,114 @@ export default function TenantsPage() {
                 style={{ backgroundColor: 'var(--primary-color)', color: 'white' }}
               >
                 <Save size={16} /> {modalMode === 'create' ? 'Create' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Manage Team Members Modal ─────────────────────────────────── */}
+      {showMembersModal && membersTeam && (
+        <div className="modal-overlay" onClick={closeMembersModal}
+             style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}
+               style={{ background: 'var(--card-bg)', color: 'var(--text-primary)', borderRadius: '12px', padding: '1.5rem', width: '90%', maxWidth: '780px', maxHeight: '85vh', display: 'flex', flexDirection: 'column', border: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+              <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <UserPlus size={22} /> Manage Members — {membersTeam.name}
+              </h2>
+              <button className="btn btn-secondary" onClick={closeMembersModal} style={{ padding: '0.4rem' }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', flex: 1, overflow: 'hidden' }}>
+              {/* Current members */}
+              <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <h4 style={{ margin: '0 0 0.5rem 0' }}>Current Members ({membersList.length})</h4>
+                <div style={{ flex: 1, overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.5rem' }}>
+                  {membersLoading ? (
+                    <p style={{ opacity: 0.6, textAlign: 'center', padding: '1rem' }}>Loading…</p>
+                  ) : membersList.length === 0 ? (
+                    <p style={{ opacity: 0.6, fontStyle: 'italic', textAlign: 'center', padding: '1rem' }}>
+                      No members yet. Add users from the right panel.
+                    </p>
+                  ) : (
+                    membersList.map(m => (
+                      <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem', borderBottom: '1px solid var(--border-color)', color: 'var(--text-primary)' }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.fullName || m.username}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary, var(--text-primary))', opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.email} · {m.role}</div>
+                        </div>
+                        <button className="btn btn-secondary" title="Remove" onClick={() => handleRemoveMember(m.id)}
+                                style={{ padding: '0.35rem', color: 'var(--danger)' }}>
+                          <UserMinus size={16} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Available users to add */}
+              <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <h4 style={{ margin: '0 0 0.5rem 0' }}>Add Users</h4>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Search users..."
+                  value={memberSearch}
+                  onChange={e => setMemberSearch(e.target.value)}
+                  style={{ marginBottom: '0.5rem' }}
+                />
+                <div style={{ flex: 1, overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.5rem' }}>
+                  {users
+                    .filter(u => u.active !== false)
+                    .filter(u => u.teamId !== membersTeam.id) // only unassigned or other-team users
+                    .filter(u => {
+                      const q = memberSearch.toLowerCase();
+                      if (!q) return true;
+                      return (u.fullName || '').toLowerCase().includes(q)
+                          || (u.username || '').toLowerCase().includes(q)
+                          || (u.email || '').toLowerCase().includes(q);
+                    })
+                    .map(u => {
+                      const checked = selectedUserIds.includes(u.id);
+                      const inOtherTeam = u.teamId && u.teamId !== membersTeam.id;
+                      return (
+                        <label key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.5rem', borderBottom: '1px solid var(--border-color)', cursor: 'pointer', color: 'var(--text-primary)', background: checked ? 'var(--hover-bg, rgba(59,130,246,0.08))' : 'transparent', borderRadius: '4px' }}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={e => {
+                              setSelectedUserIds(prev =>
+                                e.target.checked ? [...prev, u.id] : prev.filter(id => id !== u.id)
+                              );
+                            }}
+                            style={{ width: '16px', height: '16px', flexShrink: 0, margin: 0, accentColor: 'var(--primary-color)', cursor: 'pointer' }}
+                          />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.fullName || u.username}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary, var(--text-primary))', opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {u.email} · {u.role}
+                              {inOtherTeam && <span style={{ color: '#f59e0b', marginLeft: '0.5rem' }}>· will move from another team</span>}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-footer" style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary" onClick={closeMembersModal}>Close</button>
+              <button
+                className="btn btn-primary"
+                disabled={selectedUserIds.length === 0}
+                onClick={handleAddMembers}
+              >
+                <UserPlus size={16} /> Add {selectedUserIds.length > 0 ? `(${selectedUserIds.length})` : ''}
               </button>
             </div>
           </div>

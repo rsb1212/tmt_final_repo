@@ -37,6 +37,7 @@ public class TestExecutionService {
     private final TestCaseRepository       testCaseRepository;
     private final ProjectRepository        projectRepository;
     private final UserRepository           userRepository;
+    private final TeamAccessGuard          teamAccessGuard;
 
     // ── Submit new execution ──────────────────────────────────────────────────
 
@@ -52,6 +53,10 @@ public class TestExecutionService {
         User tester = getUser(testerEmail);
         TestCase tc = testCaseRepository.findById(req.getTestCaseId())
                 .orElseThrow(() -> new ResourceNotFoundException("TestCase", req.getTestCaseId()));
+
+        // chenges.md § Plan A — testers may only execute test cases that
+        // belong to a project owned by their own team.
+        teamAccessGuard.assertTestCaseAccess(tc.getId());
 
         // Allow execution for any active (non-deprecated) status
         Set<TestStatus> blocked = Set.of(TestStatus.DEPRECATED);
@@ -130,6 +135,7 @@ public class TestExecutionService {
     })
     public TestExecutionResponse update(UUID executionId,
                                          UpdateExecutionRequest req, String testerEmail) {
+        teamAccessGuard.assertExecutionAccess(executionId);
         TestExecution ex = executionRepository.findById(executionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Execution", executionId));
 
@@ -183,6 +189,7 @@ public class TestExecutionService {
 
     @Transactional(readOnly = true)
     public TestExecutionResponse getById(UUID id) {
+        teamAccessGuard.assertExecutionAccess(id);
         TestExecution ex = executionRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Execution", id));
         List<StepExecution> steps =
@@ -194,6 +201,7 @@ public class TestExecutionService {
 
     @Transactional(readOnly = true)
     public ExecutionHistoryResponse getHistoryForTestCase(UUID testCaseId) {
+        teamAccessGuard.assertTestCaseAccess(testCaseId);
         TestCase tc = testCaseRepository.findById(testCaseId)
                 .orElseThrow(() -> new ResourceNotFoundException("TestCase", testCaseId));
 
@@ -227,6 +235,12 @@ public class TestExecutionService {
     @Transactional(readOnly = true)
     public Page<TestExecutionResponse> listExecutions(UUID projectId, UUID userId,
                                                        ExecResult result, Pageable pageable) {
+        // chenges.md § Plan A — if a projectId was supplied, enforce access
+        // up-front so cross-team project IDs 403 instead of leaking an empty
+        // page. For the "no filter" branch below, we post-filter the result.
+        if (projectId != null) {
+            teamAccessGuard.assertProjectAccess(projectId);
+        }
         Page<TestExecution> page;
 
         if (projectId != null && userId != null) {
@@ -254,6 +268,20 @@ public class TestExecutionService {
             page = executionRepository.findAll(pageable);
         }
 
+        // Final defence-in-depth filter — strip any execution whose owning
+        // project is not visible to the caller. Keeps the "no projectId"
+        // branch honest for team-restricted users.
+        java.util.Optional<UUID> restrictTeamId = teamAccessGuard.currentUserTeamIdIfRestricted();
+        if (restrictTeamId.isPresent()) {
+            UUID tid = restrictTeamId.get();
+            List<TestExecution> filtered = page.getContent().stream()
+                    .filter(e -> e.getProject() == null
+                              || e.getProject().getTeamId() == null
+                              || tid.equals(e.getProject().getTeamId()))
+                    .toList();
+            page = new org.springframework.data.domain.PageImpl<>(filtered, pageable, filtered.size());
+        }
+
         return page.map(e -> toResponse(e,
                 stepExecutionRepository.findByTestExecutionOrderByStepNumberAsc(e)));
     }
@@ -262,6 +290,7 @@ public class TestExecutionService {
 
     @Transactional(readOnly = true)
     public ExecutionSummaryResponse getSummary(UUID projectId) {
+        teamAccessGuard.assertProjectAccess(projectId);
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project", projectId));
 
@@ -380,6 +409,7 @@ public class TestExecutionService {
         @CacheEvict(value = "workload",         allEntries = true),
     })
     public void delete(UUID executionId, String requesterEmail) {
+        teamAccessGuard.assertExecutionAccess(executionId);
         TestExecution ex = executionRepository.findById(executionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Execution", executionId));
         User requester = getUser(requesterEmail);

@@ -21,7 +21,8 @@ public class TenantController {
     private TenantService tenantService;
 
     @GetMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    // OLD: @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("@superAdminGuard.check()")
     public ResponseEntity<ApiResponse<List<TenantResponse>>> list() {
         List<TenantResponse> tenants = tenantService.findAll().stream()
                 .map(this::toResponse)
@@ -38,7 +39,8 @@ public class TenantController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    // OLD: @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("@superAdminGuard.check()")
     public ResponseEntity<ApiResponse<TenantResponse>> create(@RequestBody Tenant tenant) {
         try {
             Tenant created = tenantService.create(tenant);
@@ -49,7 +51,8 @@ public class TenantController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    // OLD: @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("@superAdminGuard.check()")
     public ResponseEntity<ApiResponse<TenantResponse>> update(@PathVariable UUID id, @RequestBody Tenant updates) {
         try {
             Tenant updated = tenantService.update(id, updates);
@@ -60,14 +63,16 @@ public class TenantController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    // OLD: @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("@superAdminGuard.check()")
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable UUID id) {
         tenantService.delete(id);
         return ResponseEntity.ok(ApiResponse.success(null));
     }
 
     @PostMapping("/{id}/deactivate")
-    @PreAuthorize("hasRole('ADMIN')")
+    // OLD: @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("@superAdminGuard.check()")
     public ResponseEntity<ApiResponse<Void>> deactivate(@PathVariable UUID id) {
         try {
             tenantService.deactivate(id);

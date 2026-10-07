@@ -12,13 +12,18 @@ import java.util.UUID;
         indexes = {
             @Index(name = "idx_projects_owner",  columnList = "owner_id"),
             @Index(name = "idx_projects_parent", columnList = "parent_project_id"),
-            @Index(name = "idx_projects_tenant", columnList = "tenant_id")
+            @Index(name = "idx_projects_tenant", columnList = "tenant_id"),
+            @Index(name = "idx_projects_team",   columnList = "team_id")
         })
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Project extends BaseEntity {
 
     @Column(name = "tenant_id")
     private UUID tenantId;
+
+    /** Team that owns this project. Nullable = shared/unassigned (visible to all). */
+    @Column(name = "team_id")
+    private UUID teamId;
 
     @Column(name = "name", nullable = false, length = 150)
     private String name;

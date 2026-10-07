@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { authApi, tenantApi } from '../api';
+import { authApi, tenantApi, userApi } from '../api';
 
 const AuthContext = createContext(null);
 
@@ -19,6 +19,28 @@ export function AuthProvider({ children }) {
       try { setTenant(JSON.parse(storedTenant)); } catch (err) { console.error(err); }
     }
     setLoading(false);
+
+    // Refresh the signed-in user from the server so cached fields that may be
+    // stale (e.g. role, isSuperAdmin after a DB promotion) are always current.
+    // Without this, a user promoted to Super Admin after their last login would
+    // keep the old localStorage copy (isSuperAdmin=false) and never see the
+    // Tenants page until they manually logged out and back in.
+    if (localStorage.getItem('token')) {
+      userApi.me()
+        .then(({ data }) => {
+          const fresh = data?.data;
+          if (fresh) {
+            localStorage.setItem('user', JSON.stringify(fresh));
+            setUser(fresh);
+          }
+        })
+        .catch((err) => {
+          // 401 is handled by the axios interceptor; log anything else.
+          if (err?.response?.status !== 401) {
+            console.error('Failed to refresh current user:', err);
+          }
+        });
+    }
   }, []);
 
   // Load available tenants for admin users
@@ -60,8 +82,9 @@ export function AuthProvider({ children }) {
     
     setUser(userData);
     
-    // Load tenants list for admin users
-    if (userData.role === 'ADMIN') {
+    // Load tenants list for Super Admin only (tenant APIs are Super Admin only)
+    // OLD: if (userData.role === 'ADMIN') {
+    if (userData.isSuperAdmin === true) {
       loadTenants();
     }
     
@@ -79,7 +102,8 @@ export function AuthProvider({ children }) {
       localStorage.setItem('tenantId', userData.tenantId);
     }
     setUser(userData);
-    if (userData.role === 'ADMIN') {
+    // OLD: if (userData.role === 'ADMIN') {
+    if (userData.isSuperAdmin === true) {
       loadTenants();
     }
     return userData;
@@ -115,7 +139,8 @@ export function AuthProvider({ children }) {
 
     setUser(userData);
 
-    if (userData.role === 'ADMIN') {
+    // OLD: if (userData.role === 'ADMIN') {
+    if (userData.isSuperAdmin === true) {
       loadTenants();
     }
 
@@ -143,6 +168,13 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('user');
     localStorage.removeItem('tenant');
     localStorage.removeItem('tenantId');
+    // Mark this tab as intentionally logged out so LoginPage does NOT
+    // silently bounce the user back through IDEM (the Keycloak SSO session
+    // cookie on the IdP is still alive and would re-authenticate instantly).
+    try {
+      sessionStorage.setItem('tmt.loggedOut', '1');
+      sessionStorage.removeItem('tmt.idem.redirecting');
+    } catch (_) { /* ignore */ }
     setUser(null);
     setTenant(null);
     setTenants([]);

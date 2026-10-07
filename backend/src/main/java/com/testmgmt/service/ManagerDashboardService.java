@@ -47,12 +47,14 @@ public class ManagerDashboardService {
     private final TestCaseRepository testCaseRepository;
     private final DefectRepository   defectRepository;
     private final ModuleRepository   moduleRepository;
+    private final TeamAccessGuard    teamAccessGuard;
 
     // ── Single project dashboard ──────────────────────────────────────────────
 
     @Cacheable(value = "dashboard", key = "#projectId")
     @Transactional(readOnly = true)
     public ManagerDashboardResponse getDashboard(UUID projectId) {
+        teamAccessGuard.assertProjectAccess(projectId);
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project", projectId));
 
@@ -122,8 +124,10 @@ public class ManagerDashboardService {
     @Cacheable(value = "allDashboards")
     @Transactional(readOnly = true)
     public List<ManagerDashboardResponse> getAllProjectsDashboard() {
-        // Return cached individual dashboards — each is Caffeine-backed
+        // Return cached individual dashboards — each is Caffeine-backed.
+        // Filter by current user's team so managers only see their own team's projects.
         return projectRepository.findByActiveTrue().stream()
+                .filter(teamAccessGuard::canAccessProject)
                 .map(p -> getDashboard(p.getId()))
                 .toList();
     }
@@ -133,6 +137,7 @@ public class ManagerDashboardService {
     @Cacheable(value = "moduleBreakdown", key = "#projectId")
     @Transactional(readOnly = true)
     public List<ModuleStatusSummary> getModuleBreakdown(UUID projectId) {
+        teamAccessGuard.assertProjectAccess(projectId);
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project", projectId));
 

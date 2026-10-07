@@ -90,6 +90,8 @@ public class WorkflowDTOs {
         private String description;
         /** Set to make this a sub-project under the given parent */
         private java.util.UUID parentProjectId;
+        /** Team that owns this project (null = shared/no team). */
+        private java.util.UUID teamId;
     }
 
     @Data public static class CreateDefectRequest {

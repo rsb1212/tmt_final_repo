@@ -24,6 +24,7 @@ public class DefectService {
     private final ProjectRepository projectRepository;
     private final TestCaseRepository testCaseRepository;
     private final UserRepository userRepository;
+    private final TeamAccessGuard teamAccessGuard;
 
     @Transactional
     @Caching(evict = {
@@ -33,6 +34,9 @@ public class DefectService {
     public DefectResponse create(CreateDefectRequest request, String reporterEmail) {
         Project project = projectRepository.findById(request.getProjectId())
                 .orElseThrow(() -> new ResourceNotFoundException("Project", request.getProjectId()));
+
+        // chenges.md § Plan A — can only raise defects on own-team projects.
+        teamAccessGuard.assertProjectAccess(project.getId());
 
         User reporter = userRepository.findByEmail(reporterEmail)
                 .orElseThrow(() -> new ResourceNotFoundException("User", reporterEmail));
@@ -67,6 +71,8 @@ public class DefectService {
 
     @Transactional(readOnly = true)
     public List<DefectResponse> findByProject(UUID projectId) {
+        // chenges.md § Plan A — enforce team visibility on the project.
+        teamAccessGuard.assertProjectAccess(projectId);
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project", projectId));
         return defectRepository.findByProject(project).stream().map(this::toResponse).toList();
@@ -78,6 +84,7 @@ public class DefectService {
         @CacheEvict(value = "allDashboards", allEntries = true),
     })
     public DefectResponse updateStatus(UUID id, DefectStatus newStatus) {
+        teamAccessGuard.assertDefectAccess(id);
         Defect defect = defectRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Defect", id));
         defect.setStatus(newStatus);

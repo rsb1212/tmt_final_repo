@@ -1150,24 +1150,36 @@ export default function RepositoryPage() {
   const handleUploadDocument = async () => {
     if (uploadFiles.length === 0 || !selectedNodeId) return;
     setUploadingDoc(true);
-    try {
-      const fd = new FormData();
-      uploadFiles.forEach(f => fd.append('file', f));
-      if (uploadDesc) fd.append('description', uploadDesc);
-
-      const res = await repositoryModuleApi.uploadDocument(selectedNodeId, fd);
-      const newDoc = res.data?.data || res.data;
-      setDocuments(prev => [newDoc, ...prev]);
+    // Backend accepts ONE file per request, so upload each file separately.
+    // For folder uploads, send webkitRelativePath to keep the folder structure.
+    const uploaded = [];
+    const failed = [];
+    for (const f of uploadFiles) {
+      try {
+        const fd = new FormData();
+        fd.append('file', f);
+        if (uploadDesc) fd.append('description', uploadDesc);
+        if (f.webkitRelativePath) fd.append('relativePath', f.webkitRelativePath);
+        const res = await repositoryModuleApi.uploadDocument(selectedNodeId, fd);
+        uploaded.push(res.data?.data || res.data);
+      } catch (err) {
+        failed.push(f.webkitRelativePath || f.name);
+      }
+    }
+    if (uploaded.length) setDocuments(prev => [...uploaded, ...prev]);
+    setUploadingDoc(false);
+    if (failed.length === 0) {
       setShowUploadModal(false);
       setUploadFiles([]);
       setUploadDesc('');
-      showToast('success', 'File attached successfully');
-    } catch (err) {
-      showToast('error', err.response?.data?.message || 'Attachment upload failed');
-    } finally {
-      setUploadingDoc(false);
+      showToast('success', `${uploaded.length} file(s) uploaded successfully`);
+    } else {
+      showToast('error', `${failed.length} file(s) failed: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}`);
     }
   };
+
+  // OLD single-request upload (only the first file was saved by the backend):
+  // const fd = new FormData(); uploadFiles.forEach(f => fd.append('file', f)); ...
 
   const handleDownloadDoc = async (doc) => {
     try {
@@ -2736,6 +2748,7 @@ export default function RepositoryPage() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text3)' }}>Upload Files</label>
               <input
                 type="file"
                 multiple
@@ -2751,9 +2764,29 @@ export default function RepositoryPage() {
                 }}
               />
 
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <FolderOpen size={14} /> Or Upload Folder
+              </label>
+              <input
+                type="file"
+                multiple
+                webkitdirectory=""
+                directory=""
+                onChange={e => setUploadFiles(Array.from(e.target.files || []))}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  borderRadius: 8,
+                  border: '2px dashed var(--border)',
+                  background: 'var(--bg-raised)',
+                  fontSize: 12.5,
+                  cursor: 'pointer'
+                }}
+              />
+
               {uploadFiles.length > 0 && (
-                <div style={{ fontSize: 12, color: 'var(--text2)' }}>
-                  Selected: {uploadFiles.map(f => f.name).join(', ')}
+                <div style={{ fontSize: 12, color: 'var(--text2)', maxHeight: 90, overflowY: 'auto' }}>
+                  Selected ({uploadFiles.length}): {uploadFiles.map(f => f.webkitRelativePath || f.name).join(', ')}
                 </div>
               )}
 

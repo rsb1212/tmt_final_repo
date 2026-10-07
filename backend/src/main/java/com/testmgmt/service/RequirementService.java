@@ -22,9 +22,12 @@ public class RequirementService {
     private final ProjectRepository     projectRepository;
     private final TestCaseRepository    testCaseRepository;
     private final UserRepository        userRepository;
+    private final TeamAccessGuard       teamAccessGuard;
 
     @Transactional(readOnly = true)
     public List<RequirementResponse> listByProject(UUID projectId) {
+        // chenges.md § Plan A — team-scoped read.
+        teamAccessGuard.assertProjectAccess(projectId);
         Project project = getProject(projectId);
         return requirementRepository.findByProject(project)
                 .stream().map(this::toResponse).toList();
@@ -32,6 +35,7 @@ public class RequirementService {
 
     @Transactional
     public RequirementResponse create(CreateRequirementRequest req, String creatorEmail) {
+        teamAccessGuard.assertProjectAccess(req.getProjectId());
         Project project = getProject(req.getProjectId());
         User creator = userRepository.findByEmail(creatorEmail)
                 .orElseThrow(() -> new ResourceNotFoundException("User", creatorEmail));
@@ -50,6 +54,7 @@ public class RequirementService {
 
     @Transactional
     public void linkToTestCase(UUID testCaseId, UUID requirementId) {
+        teamAccessGuard.assertTestCaseAccess(testCaseId);
         TestCase    tc  = getTestCase(testCaseId);
         Requirement req = requirementRepository.findById(requirementId)
                 .orElseThrow(() -> new ResourceNotFoundException("Requirement", requirementId));
@@ -59,6 +64,7 @@ public class RequirementService {
 
     @Transactional
     public void unlinkFromTestCase(UUID testCaseId, UUID requirementId) {
+        teamAccessGuard.assertTestCaseAccess(testCaseId);
         TestCase    tc  = getTestCase(testCaseId);
         Requirement req = requirementRepository.findById(requirementId)
                 .orElseThrow(() -> new ResourceNotFoundException("Requirement", requirementId));

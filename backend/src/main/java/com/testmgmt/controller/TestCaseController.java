@@ -3,6 +3,7 @@ package com.testmgmt.controller;
 import com.testmgmt.dto.request.WorkflowDTOs.*;
 import com.testmgmt.dto.response.ResponseDTOs.*;
 import com.testmgmt.enums.TestStatus;
+import com.testmgmt.service.TeamAccessGuard;
 import com.testmgmt.service.TestCaseService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -27,6 +28,7 @@ import java.util.UUID;
 public class TestCaseController {
 
     private final TestCaseService testCaseService;
+    private final TeamAccessGuard teamAccessGuard;
 
     @PostMapping
     @PreAuthorize("hasAnyRole('TESTER', 'MANAGER', 'ADMIN')")
@@ -34,6 +36,7 @@ public class TestCaseController {
     public ResponseEntity<ApiResponse<TestCaseResponse>> create(
             @Valid @RequestBody CreateTestCaseRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
+        teamAccessGuard.assertProjectAccess(request.getProjectId());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(testCaseService.create(request, userDetails.getUsername())));
     }
@@ -47,6 +50,7 @@ public class TestCaseController {
             @RequestParam(required = false) String module,
             @RequestParam(defaultValue = "0")  int page,
             @RequestParam(defaultValue = "20") int size) {
+        teamAccessGuard.assertProjectAccess(projectId);
         return ResponseEntity.ok(ApiResponse.success(
                 testCaseService.findAll(projectId, status, assignedToUserId, module,
                         PageRequest.of(page, size, Sort.by("createdAt").descending()))));
@@ -55,6 +59,7 @@ public class TestCaseController {
     @GetMapping("/{id}")
     @Operation(summary = "Get test case by ID")
     public ResponseEntity<ApiResponse<TestCaseResponse>> findById(@PathVariable UUID id) {
+        teamAccessGuard.assertTestCaseAccess(id);
         return ResponseEntity.ok(ApiResponse.success(testCaseService.findById(id)));
     }
 
@@ -65,6 +70,7 @@ public class TestCaseController {
             @PathVariable UUID id,
             @Valid @RequestBody CreateTestCaseRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
+        teamAccessGuard.assertTestCaseAccess(id);
         return ResponseEntity.ok(ApiResponse.success(
                 testCaseService.update(id, request, userDetails.getUsername())));
     }
@@ -73,6 +79,7 @@ public class TestCaseController {
     @PreAuthorize("hasAnyRole('MANAGER', 'ADMIN')")
     @Operation(summary = "Delete test case")
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable UUID id) {
+        teamAccessGuard.assertTestCaseAccess(id);
         testCaseService.delete(id);
         return ResponseEntity.ok(ApiResponse.ok("Test case deleted"));
     }

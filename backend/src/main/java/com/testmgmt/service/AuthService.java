@@ -130,7 +130,9 @@ public class AuthService {
                 .fullName(user.getFullName())
                 .role(user.getRole())
                 .team(user.getTeam())
+                .teamId(user.getTeamId())
                 .active(user.getActive())
+                .isSuperAdmin(Boolean.TRUE.equals(user.getIsSuperAdmin()))
                 .createdAt(user.getCreatedAt())
                 .build();
     }
