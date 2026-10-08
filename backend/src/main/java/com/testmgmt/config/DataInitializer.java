@@ -1,7 +1,13 @@
 package com.testmgmt.config;
 
+import com.testmgmt.entity.Project;
+import com.testmgmt.entity.Team;
+import com.testmgmt.entity.Tenant;
 import com.testmgmt.entity.User;
 import com.testmgmt.enums.UserRole;
+import com.testmgmt.repository.ProjectRepository;
+import com.testmgmt.repository.TeamRepository;
+import com.testmgmt.repository.TenantRepository;
 import com.testmgmt.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,6 +18,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
+import java.util.Optional;
 import java.util.UUID;
 
 @Component
@@ -26,6 +33,9 @@ public class DataInitializer implements CommandLineRunner {
             UUID.fromString("00000000-0000-0000-0000-000000000001");
 
     private final UserRepository userRepository;
+    private final TenantRepository tenantRepository;
+    private final TeamRepository teamRepository;
+    private final ProjectRepository projectRepository;
     private final PasswordEncoder passwordEncoder;
     private final JdbcTemplate jdbcTemplate;
 
@@ -51,6 +61,7 @@ public class DataInitializer implements CommandLineRunner {
     public void run(String... args) {
         backfillMissingTenantIds();
         seedDefaultAdmin();
+        seedTeamsUsersAndProjects();
     }
 
     /**
@@ -112,6 +123,208 @@ public class DataInitializer implements CommandLineRunner {
                     .build();
             userRepository.save(admin);
             log.info("✅  Default admin created: {} (tenant: DEFAULT)", adminEmail);
+        }
+    }
+
+    /**
+     * Seed 3 Teams, members with roles (ADMIN, MANAGER, SME, TESTER) and Projects.
+     */
+    private void seedTeamsUsersAndProjects() {
+        try {
+            // 1. Ensure DEFAULT Tenant exists
+            Tenant tenant = tenantRepository.findByCode("DEFAULT").orElseGet(() -> {
+                log.info("Creating DEFAULT tenant...");
+                return tenantRepository.save(Tenant.builder()
+                        .id(DEFAULT_TENANT_ID)
+                        .code("DEFAULT")
+                        .name("Default Organization")
+                        .description("Default organization for testing and demo")
+                        .active(true)
+                        .build());
+            });
+
+            // 2. Create 3 Teams
+            Team teamCore = teamRepository.findByTenantIdAndCode(tenant.getId(), "QA_CORE")
+                    .orElseGet(() -> {
+                        log.info("Creating team: QA_CORE");
+                        return teamRepository.save(Team.builder()
+                                .tenant(tenant)
+                                .code("QA_CORE")
+                                .name("Core Banking QA Team")
+                                .description("Specialized QA team for savings, current accounts, deposits, and general ledger engines.")
+                                .teamType("QA")
+                                .department("Core Banking")
+                                .channel("Branch & Retail")
+                                .active(true)
+                                .sortOrder(1)
+                                .build());
+                    });
+
+            Team teamDigital = teamRepository.findByTenantIdAndCode(tenant.getId(), "QA_DIGITAL")
+                    .orElseGet(() -> {
+                        log.info("Creating team: QA_DIGITAL");
+                        return teamRepository.save(Team.builder()
+                                .tenant(tenant)
+                                .code("QA_DIGITAL")
+                                .name("Digital Payments QA Team")
+                                .description("QA team for consumer mobile banking apps, UPI, net banking, and merchant settlement.")
+                                .teamType("QA")
+                                .department("Digital Channels")
+                                .channel("Mobile & Web")
+                                .active(true)
+                                .sortOrder(2)
+                                .build());
+                    });
+
+            Team teamIntegration = teamRepository.findByTenantIdAndCode(tenant.getId(), "QA_INTEGRATION")
+                    .orElseGet(() -> {
+                        log.info("Creating team: QA_INTEGRATION");
+                        return teamRepository.save(Team.builder()
+                                .tenant(tenant)
+                                .code("QA_INTEGRATION")
+                                .name("Enterprise Integration QA Team")
+                                .description("Responsible for middleware orchestration, ISO 20022 SWIFT messaging, and Open Banking APIs.")
+                                .teamType("QA")
+                                .department("Integration & Middleware")
+                                .channel("APIs & Webhooks")
+                                .active(true)
+                                .sortOrder(3)
+                                .build());
+                    });
+
+            // 3. Add Members with roles: ADMIN, MANAGER, SME, TESTER
+            String defaultPasswordHash = passwordEncoder.encode("Password@123");
+
+            // ADMIN
+            User adminUser = userRepository.findByEmail("admin@testgenii.com").orElseGet(() -> {
+                log.info("Creating user: admin@testgenii.com (Role: ADMIN)");
+                return userRepository.save(User.builder()
+                        .email("admin@testgenii.com")
+                        .username("admin_platform")
+                        .fullName("Platform Administrator")
+                        .passwordHash(defaultPasswordHash)
+                        .role(UserRole.ADMIN)
+                        .team(teamCore.getName())
+                        .teamId(teamCore.getId())
+                        .tenantId(tenant.getId())
+                        .active(true)
+                        .build());
+            });
+
+            // MANAGER
+            User managerUser = userRepository.findByEmail("manager@testgenii.com").orElseGet(() -> {
+                log.info("Creating user: manager@testgenii.com (Role: MANAGER)");
+                return userRepository.save(User.builder()
+                        .email("manager@testgenii.com")
+                        .username("qa_manager")
+                        .fullName("QA Delivery Manager")
+                        .passwordHash(defaultPasswordHash)
+                        .role(UserRole.MANAGER)
+                        .team(teamCore.getName())
+                        .teamId(teamCore.getId())
+                        .tenantId(tenant.getId())
+                        .active(true)
+                        .build());
+            });
+
+            // Assign Manager as Lead for Team Core
+            if (teamCore.getLeadId() == null) {
+                teamCore.setLeadId(managerUser.getId());
+                teamRepository.save(teamCore);
+            }
+
+            // SME
+            User smeUser = userRepository.findByEmail("sme@testgenii.com").orElseGet(() -> {
+                log.info("Creating user: sme@testgenii.com (Role: SME)");
+                return userRepository.save(User.builder()
+                        .email("sme@testgenii.com")
+                        .username("banking_sme")
+                        .fullName("Senior Banking SME")
+                        .passwordHash(defaultPasswordHash)
+                        .role(UserRole.SME)
+                        .team(teamDigital.getName())
+                        .teamId(teamDigital.getId())
+                        .tenantId(tenant.getId())
+                        .active(true)
+                        .build());
+            });
+
+            // TESTER
+            User testerUser = userRepository.findByEmail("tester@testgenii.com").orElseGet(() -> {
+                log.info("Creating user: tester@testgenii.com (Role: TESTER)");
+                return userRepository.save(User.builder()
+                        .email("tester@testgenii.com")
+                        .username("qa_tester")
+                        .fullName("Senior Test Engineer")
+                        .passwordHash(defaultPasswordHash)
+                        .role(UserRole.TESTER)
+                        .team(teamIntegration.getName())
+                        .teamId(teamIntegration.getId())
+                        .tenantId(tenant.getId())
+                        .active(true)
+                        .build());
+            });
+
+            // Additional testers in teams
+            if (!userRepository.existsByEmail("tester.core@testgenii.com")) {
+                userRepository.save(User.builder()
+                        .email("tester.core@testgenii.com")
+                        .username("tester_core")
+                        .fullName("Core Banking Tester")
+                        .passwordHash(defaultPasswordHash)
+                        .role(UserRole.TESTER)
+                        .team(teamCore.getName())
+                        .teamId(teamCore.getId())
+                        .tenantId(tenant.getId())
+                        .active(true)
+                        .build());
+            }
+
+            if (!userRepository.existsByEmail("tester.digital@testgenii.com")) {
+                userRepository.save(User.builder()
+                        .email("tester.digital@testgenii.com")
+                        .username("tester_digital")
+                        .fullName("Digital Channels Tester")
+                        .passwordHash(defaultPasswordHash)
+                        .role(UserRole.TESTER)
+                        .team(teamDigital.getName())
+                        .teamId(teamDigital.getId())
+                        .tenantId(tenant.getId())
+                        .active(true)
+                        .build());
+            }
+
+            // 4. Create Projects
+            seedProjectIfNotExists("Core Banking Modernization",
+                    "End-to-end testing of next-generation core ledger, savings accounts, and term deposits.",
+                    managerUser, tenant.getId());
+
+            seedProjectIfNotExists("Mobile Banking & UPI 2.0",
+                    "Testing iOS and Android customer banking apps, biometric login, and real-time UPI switch.",
+                    managerUser, tenant.getId());
+
+            seedProjectIfNotExists("Open Banking & SWIFT Gateway",
+                    "Cross-border ISO 20022 wire messaging, webhook compliance, and developer API sandbox.",
+                    managerUser, tenant.getId());
+
+            log.info("✅ Successfully seeded 3 teams, members with roles (ADMIN, MANAGER, SME, TESTER) and projects.");
+        } catch (Exception ex) {
+            log.warn("⚠️ Could not complete seedTeamsUsersAndProjects: {}", ex.getMessage());
+        }
+    }
+
+    private void seedProjectIfNotExists(String name, String description, User owner, UUID tenantId) {
+        boolean exists = projectRepository.findByActiveTrue().stream()
+                .anyMatch(p -> name.equalsIgnoreCase(p.getName()));
+        if (!exists) {
+            projectRepository.save(Project.builder()
+                    .name(name)
+                    .description(description)
+                    .owner(owner)
+                    .tenantId(tenantId)
+                    .active(true)
+                    .build());
+            log.info("Project created: {}", name);
         }
     }
 }
